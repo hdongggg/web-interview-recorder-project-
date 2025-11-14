@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Video Recorder</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding: 20px; }
+        #videoPlayer { border: 2px solid #3498db; margin: 20px auto; display: block; }
+        .controls button { padding: 10px 20px; margin: 5px; cursor: pointer; border: none; border-radius: 5px; }
+        #startBtn { background-color: #2ecc71; color: white; }
+        #stopBtn { background-color: #e74c3c; color: white; }
+        button:disabled { background-color: #bdc3c7; cursor: not-allowed; }
+        #status { margin-top: 15px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <h1>Webcam Recorder</h1>
+    <video id="videoPlayer" width="640" height="480" autoplay muted></video>
+
+    <div class="controls">
+        <button id="startBtn" disabled>🔴 Bắt Đầu Ghi</button>
+        <button id="stopBtn" disabled>⏹️ Dừng Ghi & Tải Lên</button>
+    </div>
+
+    <p id="status">Đang tải...</p>
+
+    <script>
+        const videoPlayer = document.getElementById('videoPlayer');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const statusEl = document.getElementById('status');
+
+        // CHỈNH SỬA ĐỊA CHỈ NÀY KHI TRIỂN KHAI ONLINE
+        const UPLOAD_URL = 'http://127.0.0.1:8000/api/upload';
+
+        let mediaRecorder;
+        let recordedChunks = [];
+        let stream;
+
+        // 1. Khởi tạo Camera
+        async function setupCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                videoPlayer.srcObject = stream;
+                statusEl.textContent = '✅ Camera sẵn sàng.';
+                startBtn.disabled = false;
+            } catch (error) {
+                statusEl.textContent = `❌ Lỗi: Không thể truy cập camera. Vui lòng chạy trên localhost hoặc HTTPS.`;
+            }
+        }
+
+        // 2. Bắt đầu Ghi
+        startBtn.onclick = () => {
+            if (!stream) return;
+            mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+            recordedChunks = [];
+
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) recordedChunks.push(event.data);
+            };
+
+            mediaRecorder.start();
+            statusEl.textContent = '🔴 Đang ghi hình...';
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+        };
+
+        // 3. Dừng Ghi & Tải lên
+        stopBtn.onclick = () => {
+            mediaRecorder.stop();
+            statusEl.textContent = 'Đang dừng và chuẩn bị tải lên...';
+            startBtn.disabled = true;
+            stopBtn.disabled = true;
+
+            mediaRecorder.onstop = () => {
+                const videoBlob = new Blob(recordedChunks, { type: 'video/webm' });
+                const filename = `response_video_${Date.now()}.webm`;
+                uploadVideo(videoBlob, filename);
+
+                // Dừng camera
+                stream.getTracks().forEach(track => track.stop());
+                videoPlayer.srcObject = null;
+            };
+        };
+
+        // 4. Hàm Tải lên Server
+        async function uploadVideo(videoBlob, filename) {
+            const formData = new FormData();
+            formData.append('file', videoBlob, filename); // Tên trường 'file' phải khớp với Back-end
+
+            try {
+                const response = await fetch(UPLOAD_URL, {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    statusEl.textContent = `✅ Tải lên thành công! File tại: ${result.url}`;
+                } else {
+                    statusEl.textContent = `❌ Lỗi: ${result.detail || response.statusText}`;
+                }
+            } catch (error) {
+                statusEl.textContent = `❌ Lỗi mạng: Không kết nối được tới server.`;
+            } finally {
+                startBtn.disabled = false; // Cho phép ghi tiếp
+                stopBtn.disabled = true;
+                setupCamera();
+            }
+        }
+
+        setupCamera();
+    </script>
+</body>
+</html>
