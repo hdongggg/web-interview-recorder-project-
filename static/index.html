@@ -11,6 +11,7 @@
         #stopBtn { background-color: #e74c3c; color: white; }
         button:disabled { background-color: #bdc3c7; cursor: not-allowed; }
         #status { margin-top: 15px; font-weight: bold; }
+        #resultContainer { margin-top: 30px; padding: 10px; border-top: 1px solid #ccc; }
     </style>
 </head>
 <body>
@@ -25,15 +26,16 @@
 
     <p id="status">Đang tải...</p>
 
+    <div id="resultContainer"></div>
+
     <script>
         const videoPlayer = document.getElementById('videoPlayer');
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
         const statusEl = document.getElementById('status');
+        const resultContainer = document.getElementById('resultContainer'); // Lấy phần tử mới
 
         // CHỈNH SỬA ĐỊA CHỈ NÀY KHI TRIỂN KHAI ONLINE
-        // CHỈNH SỬA ĐỊA CHỈ NÀY KHI TRIỂN KHAI ONLINE
-// BỔ SUNG ENDPOINT CỦA API
         const UPLOAD_URL = 'https://web-interview-recorder-project.onrender.com/api/upload';
 
         let mediaRecorder;
@@ -66,6 +68,7 @@
             statusEl.textContent = '🔴 Đang ghi hình...';
             startBtn.disabled = true;
             stopBtn.disabled = false;
+            resultContainer.innerHTML = ''; // Xóa kết quả cũ khi bắt đầu ghi
         };
 
         // 3. Dừng Ghi & Tải lên
@@ -89,7 +92,7 @@
         // 4. Hàm Tải lên Server
         async function uploadVideo(videoBlob, filename) {
             const formData = new FormData();
-            formData.append('file', videoBlob, filename); // Tên trường 'file' phải khớp với Back-end
+            formData.append('file', videoBlob, filename);
 
             try {
                 const response = await fetch(UPLOAD_URL, {
@@ -100,14 +103,25 @@
                 const result = await response.json();
 
                 if (response.ok) {
-                    statusEl.textContent = `✅ Tải lên thành công! File tại: ${result.url}`;
+                    const videoUrl = result.url; // Lấy đường dẫn video từ server (ví dụ: /uploads/ten_file.webm)
+
+                    statusEl.textContent = `✅ Tải lên thành công!`;
+
+                    // Hiển thị video đã ghi và link xem
+                    resultContainer.innerHTML =
+                        `<h3>Video đã ghi</h3>
+                         <video src="${videoUrl}" width="400" height="300" controls></video>
+                         <p>Đường dẫn công khai: <a href="${videoUrl}" target="_blank">${videoUrl}</a></p>`;
+
                 } else {
                     statusEl.textContent = `❌ Lỗi: ${result.detail || response.statusText}`;
+                    resultContainer.innerHTML = `<p>Lỗi tải lên. Vui lòng kiểm tra Log Render.</p>`;
                 }
             } catch (error) {
                 statusEl.textContent = `❌ Lỗi mạng: Không kết nối được tới server.`;
+                resultContainer.innerHTML = `<p>Lỗi mạng. Vui lòng kiểm tra server online đã chạy chưa.</p>`;
             } finally {
-                startBtn.disabled = false; // Cho phép ghi tiếp
+                startBtn.disabled = false;
                 stopBtn.disabled = true;
                 setupCamera();
             }
