@@ -41,26 +41,30 @@ async def examiner_page():
 # --- API UPLOAD ĐÃ SỬA ĐỔI ---
 @app.post("/api/upload")
 async def upload_video(file: UploadFile = File(...)):
-    # 1. Lấy tên file gốc do Frontend gửi lên (Ví dụ: NguyenVanA_Question1.webm)
-    original_filename = file.filename
+    # 1. Lấy tên file từ Frontend (VD: NguyenVanA_Question_1.webm)
+    filename = file.filename
     
-    # Để tránh trùng lặp nếu họ quay lại câu đó, ta thêm timestamp ngắn vào đầu
-    # Ví dụ: 103055_NguyenVanA_Question1.webm
-    timestamp = datetime.now().strftime("%H%M%S")
-    safe_filename = f"{timestamp}_{original_filename}"
+    # [QUAN TRỌNG] ĐÃ BỎ TIMESTAMP Ở ĐÂY. 
+    # File mới sẽ GHI ĐÈ (OVERWRITE) file cũ có cùng tên.
     
-    # Xử lý ký tự đặc biệt để tránh lỗi hệ thống file
-    safe_filename = "".join(c for c in safe_filename if c.isalnum() or c in "._-")
+    # Chỉ làm sạch tên file để an toàn
+    safe_filename = "".join(c for c in filename if c.isalnum() or c in "._-")
     
     dest = UPLOAD_DIR / safe_filename
 
     try:
+        # Ghi file mới (ghi đè lên file cũ nếu tồn tại)
         with dest.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi lưu file: {e}")
 
-    return {"ok": True, "filename": safe_filename, "url": f"/uploads/{safe_filename}"}
+    # Trả về đường dẫn. Thêm timestamp vào URL để trình duyệt tải file mới nhất
+    return {
+        "ok": True, 
+        "filename": safe_filename, 
+        "url": f"/uploads/{safe_filename}?v={datetime.now().timestamp()}"
+    }
 
 # --- CÁC API KHÁC (GET LIST, DELETE) GIỮ NGUYÊN ---
 @app.get("/api/videos")
