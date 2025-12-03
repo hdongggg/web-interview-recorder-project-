@@ -92,11 +92,12 @@
         }
 
         // --- API CALLS ---
+        // --- HÀM GỌI API (HIỆN NÚT DOWNLOAD) ---
         async function transcribeVideo(filename, elementId, btn) {
             const box = document.getElementById(elementId);
             const originalText = btn.innerText;
             
-            btn.innerText = "⏳ Processing AI...";
+            btn.innerText = "⏳ Processing...";
             btn.disabled = true;
             btn.style.backgroundColor = "#999";
 
@@ -105,9 +106,20 @@
                 const result = await response.json();
 
                 if (response.ok) {
+                    // 1. Ẩn nút Transcribe đi
+                    btn.style.display = 'none';
+                    
+                    // 2. Hiển thị nút Download File Text
                     box.style.display = 'block';
-                    box.innerText = result.text;
-                    btn.style.display = 'none'; 
+                    box.style.border = 'none'; 
+                    box.style.backgroundColor = 'transparent';
+                    box.style.padding = '0';
+                    
+                    box.innerHTML = `
+                        <a href="${result.txt_url}" download="${result.txt_filename}" class="btn" style="background-color: #28a745; display: block; text-align: center; margin-top: 5px;">
+                            ⬇️ Download Transcript (.txt)
+                        </a>
+                    `;
                 } else {
                     alert("AI Error: " + result.detail);
                     btn.innerText = originalText;
@@ -115,7 +127,7 @@
                     btn.style.backgroundColor = "#6f42c1";
                 }
             } catch (err) {
-                alert("Connection error or video too long.");
+                alert("Connection error.");
                 btn.innerText = originalText;
                 btn.disabled = false;
                 btn.style.backgroundColor = "#6f42c1";
