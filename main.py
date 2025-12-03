@@ -6,7 +6,7 @@ from pathlib import Path
 import shutil
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta  # <--- Thêm timedelta vào đây
 import google.generativeai as genai
 #Bổ sung gg cloud API
 from google.cloud import speech_v1p1beta1 as speech
