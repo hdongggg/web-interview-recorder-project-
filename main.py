@@ -1,22 +1,37 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, BackgroundTasks
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from pathlib import Path
 import shutil
 import os
-import time
+import json
+import re
 from datetime import datetime
-import google.generativeai as genai
+import pytz # Xử lý múi giờ Asia/Bangkok
 
-app = FastAPI(title="Interview System")
+# --- GOOGLE CLOUD IMPORTS (Chỉ chạy nếu có Key) ---
+try:
+    from google.cloud import speech
+    from google.cloud import storage
+    HAS_GOOGLE_CLOUD = True
+except ImportError:
+    HAS_GOOGLE_CLOUD = False
+    print("⚠️ Chưa cài thư viện Google Cloud. Tính năng STT sẽ bị tắt.")
 
-# --- GEMINI CONFIGURATION ---
-# Get API Key: https://aistudio.google.com/app/apikey
-GOOGLE_API_KEY = "AIzaSyD7d78Goxctsn7OohpVKp-ggUT3jgC9tZs" # <--- PASTE YOUR KEY HERE
-genai.configure(api_key=GOOGLE_API_KEY)
+app = FastAPI(title="Web Interview Recorder")
 
-# CORS & Directories
+# --- CẤU HÌNH ---
+# Token bí mật để đơn giản hóa xác thực
+SECRET_TOKEN = "SUPER_SECRET_PROJECT_TOKEN_123" 
+TIMEZONE = pytz.timezone('Asia/Bangkok') #
+UPLOAD_DIR = Path("/mnt/videos") # Đường dẫn Volume trên Railway
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# Tên Bucket GCS (Điền tên bucket của bạn vào đây nếu dùng STT)
+GCS_BUCKET_NAME = "ten-bucket-cua-ban" 
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -24,109 +39,184 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-UPLOAD_DIR = Path("/mnt/videos")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
 BASE_DIR = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
+# --- MODELS ---
+class SessionStart(BaseModel):
+    token: str
+    userName: str
+
+class SessionFinish(BaseModel):
+    token: str
+    folder: str
+    questionsCount: int
+
+# --- HELPER FUNCTIONS ---
+def sanitize_filename(name: str) -> str:
+    """Tạo tên an toàn cho thư mục"""
+    name = re.sub(r'[^\w\s-]', '', name).strip()
+    return re.sub(r'[-\s]+', '_', name)
+
+def get_timestamp():
+    return datetime.now(TIMEZONE).isoformat()
+
+# --- GOOGLE CLOUD STT FUNCTION (BONUS) ---
+def process_stt_background(filepath: Path, filename: str, folder_path: Path, question_idx: int):
+    """Xử lý STT dưới nền để không chặn UI"""
+    if not HAS_GOOGLE_CLOUD:
+        return
+
+    try:
+        # 1. Init Clients
+        storage_client = storage.Client()
+        speech_client = speech.SpeechClient()
+        
+        # 2. Upload lên GCS
+        bucket = storage_client.bucket(GCS_BUCKET_NAME)
+        blob = bucket.blob(f"temp/{filename}")
+        blob.upload_from_filename(filepath)
+        gcs_uri = f"gs://{GCS_BUCKET_NAME}/temp/{filename}"
+
+        # 3. Call Speech API (Long Running)
+        audio = speech.RecognitionAudio(uri=gcs_uri)
+        config = speech.RecognitionConfig(
+            encoding=speech.RecognitionConfig.AudioEncoding.WEBM_OPUS,
+            sample_rate_hertz=48000, # Tùy chỉnh theo mic
+            language_code="vi-VN",
+            enable_automatic_punctuation=True,
+        )
+        
+        operation = speech_client.long_running_recognize(config=config, audio=audio)
+        response = operation.result(timeout=600)
+
+        # 4. Get Transcript
+        transcript = ""
+        for result in response.results:
+            transcript += result.alternatives[0].transcript + " "
+
+        # 5. Save Transcript
+        transcript_file = folder_path / "transcript.txt"
+        with transcript_file.open("a", encoding="utf-8") as f:
+            f.write(f"\n--- Question {question_idx} ---\n{transcript}\n")
+
+        # 6. Clean up GCS
+        blob.delete()
+        print(f"✅ STT Success for {filename}")
+
+    except Exception as e:
+        print(f"❌ STT Error for {filename}: {e}")
+
 # --- ROUTES ---
+
 @app.get("/", response_class=HTMLResponse)
 async def home():
     try:
         return (BASE_DIR / "static" / "index.html").read_text(encoding="utf-8")
     except FileNotFoundError:
-        return "Error: index.html missing."
+        return "<h1>Lỗi: Không tìm thấy file index.html</h1>"
 
-@app.get("/examiner", response_class=HTMLResponse)
-async def examiner_page():
-    try:
-        return (BASE_DIR / "static" / "examiner.html").read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return "Error: examiner.html missing."
-
-# --- API: UPLOAD VIDEO ---
-@app.post("/api/upload")
-async def upload_video(file: UploadFile = File(...)):
-    filename = file.filename
-    # Clean filename, remove timestamp logic to allow overwrites (Re-record)
-    safe_filename = "".join(c for c in filename if c.isalnum() or c in "._-")
-    dest = UPLOAD_DIR / safe_filename
-
-    try:
-        with dest.open("wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"File save error: {e}")
-
-    return {"ok": True, "filename": safe_filename, "url": f"/uploads/{safe_filename}?v={datetime.now().timestamp()}"}
-
-# --- API: GET LIST ---
-@app.get("/api/videos")
-async def get_all_videos():
-    if not UPLOAD_DIR.is_dir(): return []
-    videos = []
-    files = sorted(UPLOAD_DIR.iterdir(), key=lambda f: f.stat().st_mtime, reverse=True)
-    for f in files:
-        if f.is_file():
-            videos.append({
-                "name": f.name,
-                "url": f"/uploads/{f.name}",
-                "size": f"{f.stat().st_size/1024/1024:.2f} MB",
-                "created": datetime.fromtimestamp(f.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
-            })
-    return videos
-
-# --- API: DELETE ONE ---
-@app.delete("/api/video/{filename}")
-async def delete_video(filename: str):
-    file_path = UPLOAD_DIR / filename
-    if not file_path.exists(): raise HTTPException(status_code=404, detail="File not found")
-    file_path.unlink()
+@app.post("/api/verify-token")
+async def verify_token_endpoint(data: dict):
+    if data.get("token") != SECRET_TOKEN:
+        raise HTTPException(status_code=401, detail="Token không hợp lệ")
     return {"ok": True}
 
-# --- API: DELETE ALL ---
-@app.delete("/api/nuke-all-videos")
-async def delete_all_videos():
-    if not UPLOAD_DIR.is_dir(): return {"ok": False}
-    for f in UPLOAD_DIR.iterdir():
-        if f.is_file():
-            try: os.remove(f)
-            except: pass
-    return {"ok": True}
+@app.post("/api/session/start")
+async def session_start(data: SessionStart):
+    # Validate Token
+    if data.token != SECRET_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid Token")
 
-# --- API: TRANSCRIBE (GEMINI) ---
-@app.post("/api/transcribe/{filename}")
-async def transcribe_video(filename: str):
-    file_path = UPLOAD_DIR / filename
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
+    # Tạo tên thư mục: DD_MM_YYYY_HH_mm_ten_user
+    now = datetime.now(TIMEZONE)
+    folder_name = f"{now.strftime('%d_%m_%Y_%H_%M')}_{sanitize_filename(data.userName)}"
+    session_path = UPLOAD_DIR / folder_name
     
     try:
-        # 1. Upload to Google
-        video_file = genai.upload_file(path=file_path, display_name=filename)
-        
-        # 2. Wait for processing
-        while video_file.state.name == "PROCESSING":
-            time.sleep(1)
-            video_file = genai.get_file(video_file.name)
+        session_path.mkdir(parents=True, exist_ok=False)
+        # Tạo metadata ban đầu
+        meta = {
+            "userName": data.userName,
+            "startTime": get_timestamp(),
+            "timeZone": "Asia/Bangkok",
+            "questions": []
+        }
+        with (session_path / "meta.json").open("w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=4)
+    except FileExistsError:
+        # Nếu trùng tên (do test quá nhanh), thêm giây vào
+        folder_name += f"_{now.second}"
+        session_path = UPLOAD_DIR / folder_name
+        session_path.mkdir(parents=True, exist_ok=True)
+    
+    return {"ok": True, "folder": folder_name}
+
+@app.post("/api/upload-one")
+async def upload_one(
+    background_tasks: BackgroundTasks,
+    token: str = Form(...),
+    folder: str = Form(...),
+    questionIndex: int = Form(...),
+    video: UploadFile = File(...)
+):
+    # Validate
+    if token != SECRET_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid Token")
+    
+    session_path = UPLOAD_DIR / folder
+    if not session_path.exists():
+        raise HTTPException(status_code=404, detail="Session folder not found")
+
+    # Save Video: Q{index}.webm
+    filename = f"Q{questionIndex}.webm"
+    file_path = session_path / filename
+    
+    try:
+        with file_path.open("wb") as buffer:
+            shutil.copyfileobj(video.file, buffer)
             
-        if video_file.state.name == "FAILED":
-            raise ValueError("Google failed to process video.")
-
-        # 3. Request Transcription (English Prompt)
-        model = genai.GenerativeModel(model_name="gemini-1.5-flash-001")
-        response = model.generate_content(
-            [video_file, "Listen to the video and provide a full transcript of the speech. Output only the text content, no introductory phrases."],
-            request_options={"timeout": 600}
-        )
-
-        # 4. Cleanup
-        genai.delete_file(video_file.name)
-
-        return {"ok": True, "text": response.text}
+        # Update Metadata
+        meta_path = session_path / "meta.json"
+        if meta_path.exists():
+            with meta_path.open("r", encoding="utf-8") as f:
+                meta = json.load(f)
+            
+            meta["questions"].append({
+                "index": questionIndex,
+                "file": filename,
+                "uploadedAt": get_timestamp()
+            })
+            
+            with meta_path.open("w", encoding="utf-8") as f:
+                json.dump(meta, f, indent=4)
+        
+        # Trigger STT Background Task (Bonus)
+        # Chỉ chạy nếu đã config Google Cloud credential trên server
+        if HAS_GOOGLE_CLOUD:
+            background_tasks.add_task(process_stt_background, file_path, filename, session_path, questionIndex)
 
     except Exception as e:
-        print(f"AI Error: {e}")
-        raise HTTPException(status_code=500, detail=f"AI Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {"ok": True, "savedAs": filename}
+
+@app.post("/api/session/finish")
+async def session_finish(data: SessionFinish):
+    if data.token != SECRET_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid Token")
+        
+    session_path = UPLOAD_DIR / data.folder
+    meta_path = session_path / "meta.json"
+    
+    if meta_path.exists():
+        with meta_path.open("r+", encoding="utf-8") as f:
+            meta = json.load(f)
+            meta["endTime"] = get_timestamp()
+            meta["totalQuestions"] = data.questionsCount
+            meta["status"] = "FINISHED"
+            f.seek(0)
+            json.dump(meta, f, indent=4)
+            
+    return {"ok": True}
