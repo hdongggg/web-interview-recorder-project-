@@ -68,23 +68,22 @@ async def upload_video(file: UploadFile = File(...)):
     return {"ok": True, "filename": safe_filename, "url": f"/uploads/{safe_filename}?v={datetime.now().timestamp()}"}
 
 # --- API: GET LIST ---
-# --- API: GET LIST ---
 @app.get("/api/videos")
 async def get_all_videos():
     if not UPLOAD_DIR.is_dir(): return []
     videos = []
-    # Lấy danh sách file
+    # Lấy danh sách file và sắp xếp mới nhất lên đầu
     files = sorted(UPLOAD_DIR.iterdir(), key=lambda f: f.stat().st_mtime, reverse=True)
     
     for f in files:
         if f.is_file():
-            # 1. Lấy thời gian sửa đổi file (đang là UTC)
+            # 1. Lấy thời gian gốc (UTC) từ file
             utc_time = datetime.utcfromtimestamp(f.stat().st_mtime)
             
             # 2. Cộng thêm 7 giờ để thành giờ Việt Nam
             vn_time = utc_time + timedelta(hours=7)
             
-            # 3. Định dạng đẹp (Ngày/Tháng/Năm Giờ:Phút:Giây)
+            # 3. Định dạng lại cho đẹp (Ngày/Tháng/Năm Giờ:Phút)
             formatted_time = vn_time.strftime("%d/%m/%Y %H:%M:%S")
 
             videos.append({
