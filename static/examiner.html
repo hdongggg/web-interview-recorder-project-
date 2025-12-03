@@ -16,32 +16,33 @@
         /* Các nút bấm */
         .btn { display: inline-block; padding: 6px 12px; margin-right: 5px; margin-bottom: 5px; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: bold; border: none; cursor: pointer; color: white; transition: 0.2s; }
         .btn:hover { opacity: 0.9; }
-        
-        /* Màu sắc */
         .btn-watch { background-color: #17a2b8; }
         .btn-stt { background-color: #6f42c1; } 
         .btn-delete { background-color: #dc3545; }
-        .btn-download-small { background-color: #28a745; font-size: 12px; padding: 4px 10px; } /* Nút download nhỏ hơn */
+        .btn-download-small { background-color: #28a745; font-size: 12px; padding: 4px 10px; margin-right: 0;} /* Giữ nút download nhỏ */
 
-        /* Khung hiển thị text STT */
+        /* [CẢI THIỆN READABILITY] Khung hiển thị text STT */
         .transcript-box {
             margin-top: 10px;
-            padding: 10px;
-            background-color: #f1f8ff;
-            border: 1px solid #cce5ff;
-            border-radius: 4px;
+            /* Tăng padding và nền trắng sạch sẽ hơn */
+            padding: 15px; 
+            background-color: #ffffff; 
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
             font-size: 14px;
             color: #333;
-            line-height: 1.5;
+            line-height: 1.6; /* Tăng khoảng cách dòng */
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08); /* Thêm bóng mờ */
             display: none; 
         }
-        /* Style cho nội dung Text bên trong */
         .transcript-content {
+            /* Đảm bảo text căn trái và có cuộn */
+            text-align: left;
             max-height: 200px; 
-            overflow-y: auto; /* Thêm thanh cuộn nếu text dài */
-            white-space: pre-wrap;
-            margin-bottom: 8px;
+            overflow-y: auto; 
+            white-space: pre-wrap; 
             padding-right: 5px;
+            margin-bottom: 8px;
         }
     </style>
 </head>
@@ -68,7 +69,8 @@
     </table>
 
     <script>
-        // Hàm chính: Lấy danh sách video
+        // --- LOGIC JS (Không đổi logic, chỉ đổi nội dung hiển thị) ---
+        
         async function loadVideos() {
             try {
                 const response = await fetch('/api/videos');
@@ -102,12 +104,10 @@
             } catch (err) { console.error(err); }
         }
 
-        // Hàm gọi API dịch (STT)
         async function transcribeVideo(filename, elementId, btn) {
             const box = document.getElementById(elementId);
             const originalText = btn.innerText;
             
-            // Đổi trạng thái nút
             btn.innerText = "⏳ Processing AI...";
             btn.disabled = true;
             btn.style.backgroundColor = "#999";
@@ -117,10 +117,10 @@
                 const result = await response.json();
 
                 if (response.ok) {
-                    // Ẩn nút Transcribe đi
+                    // Ẩn nút Transcribe
                     btn.style.display = 'none';
                     
-                    // Hiển thị khung văn bản (Preview)
+                    // Hiển thị khung văn bản đã được tối ưu
                     box.style.display = 'block';
                     box.innerHTML = `
                         <div class="transcript-content">
@@ -146,21 +146,19 @@
             }
         }
 
-        // Hàm xóa 1 video
+        // --- CÁC HÀM XÓA VÀ PLAY (Giữ nguyên) ---
         async function deleteVideo(filename) {
             if (!confirm(`Delete file "${filename}"?`)) return;
             await fetch(`/api/video/${filename}`, { method: 'DELETE' });
             loadVideos();
         }
         
-        // Hàm xóa toàn bộ video
         async function deleteAllVideos() {
             if (!confirm("WARNING: DELETE ALL VIDEOS?")) return;
             await fetch('/api/nuke-all-videos', { method: 'DELETE' });
             loadVideos();
         }
 
-        // Hàm xem video (Player)
         function playVideo(url) {
             const preview = document.getElementById('video-preview');
             preview.innerHTML = `
