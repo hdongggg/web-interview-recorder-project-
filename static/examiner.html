@@ -11,11 +11,21 @@
         th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
         th { background-color: #f4f4f4; }
         tr:nth-child(even) { background-color: #f9f9f9; }
+        
+        /* Style cho nút Xem và Tải về */
         .btn-watch {
             background-color: #007bff; color: white; padding: 8px 15px; 
             text-decoration: none; border-radius: 4px;
         }
         .btn-watch:hover { background-color: #0056b3; }
+
+        /* Style cho nút Xóa */
+        .btn-delete {
+            background-color: #dc3545; color: white; border: none;
+            padding: 8px 15px; cursor: pointer; border-radius: 4px;
+        }
+        .btn-delete:hover { background-color: #a71d2a; }
+
         video { max-width: 100%; display: none; margin-top: 10px; }
     </style>
 </head>
@@ -32,13 +42,14 @@
                 <th>Ngày Nộp</th>
                 <th>Kích thước</th>
                 <th>Hành động</th>
-            </tr>
+                <th style="width: 80px; text-align: center;">Xóa</th> </tr>
         </thead>
         <tbody id="video-list">
             </tbody>
     </table>
 
     <script>
+        // Hàm tải danh sách video
         async function loadVideos() {
             try {
                 // Gọi API lấy danh sách từ server
@@ -46,7 +57,13 @@
                 const videos = await response.json();
                 
                 const list = document.getElementById('video-list');
-                list.innerHTML = ''; // Xóa cũ
+                list.innerHTML = ''; // Xóa danh sách cũ
+
+                if (videos.length === 0) {
+                    // colspan = 5 vì bây giờ bảng có 5 cột
+                    list.innerHTML = '<tr><td colspan="5" style="text-align:center">Chưa có video nào được nộp.</td></tr>';
+                    return;
+                }
 
                 videos.forEach(vid => {
                     const row = document.createElement('tr');
@@ -58,13 +75,12 @@
                             <a href="#" class="btn-watch" onclick="playVideo('${vid.url}'); return false;">Xem ngay</a>
                             <a href="${vid.url}" target="_blank" style="margin-left:10px;">Tải về</a>
                         </td>
+                        <td style="text-align: center;">
+                            <button class="btn-delete" onclick="deleteVideo('${vid.name}')">Xóa</button>
+                        </td>
                     `;
                     list.appendChild(row);
                 });
-
-                if (videos.length === 0) {
-                    list.innerHTML = '<tr><td colspan="4" style="text-align:center">Chưa có video nào được nộp.</td></tr>';
-                }
 
             } catch (err) {
                 console.error("Lỗi:", err);
@@ -72,16 +88,49 @@
             }
         }
 
+        // Hàm xử lý xóa video (MỚI)
+        async function deleteVideo(filename) {
+            // Hỏi xác nhận trước khi xóa để tránh lỡ tay
+            if (!confirm(`CẢNH BÁO: Bạn có chắc chắn muốn xóa vĩnh viễn file "${filename}" không?`)) {
+                return;
+            }
+
+            try {
+                // Gọi API DELETE đã viết trong main.py
+                const response = await fetch(`/api/video/${filename}`, {
+                    method: 'DELETE',
+                });
+
+                if (response.ok) {
+                    alert(`Đã xóa thành công file: ${filename}`);
+                    // Tải lại danh sách để cập nhật giao diện
+                    loadVideos();
+                } else {
+                    const error = await response.json();
+                    alert(`Lỗi khi xóa: ${error.detail}`);
+                }
+            } catch (err) {
+                alert("Lỗi kết nối đến server.");
+                console.error(err);
+            }
+        }
+
+        // Hàm phát video
         function playVideo(url) {
             const preview = document.getElementById('video-preview');
             preview.innerHTML = `
-                <h3>Đang xem: ${url.split('/').pop()}</h3>
-                <video controls autoplay style="display:block; max-height:400px; margin:0 auto;">
-                    <source src="${url}" type="video/webm">
-                    <source src="${url}" type="video/mp4">
-                    Trình duyệt không hỗ trợ thẻ video.
-                </video>
+                <div style="background: #eee; padding: 15px; border-radius: 8px; display: inline-block;">
+                    <h3 style="margin-top:0;">Đang xem: ${url.split('/').pop()}</h3>
+                    <video controls autoplay style="display:block; max-height:400px; margin:0 auto;">
+                        <source src="${url}" type="video/webm">
+                        <source src="${url}" type="video/mp4">
+                        Trình duyệt không hỗ trợ thẻ video.
+                    </video>
+                    <button onclick="document.getElementById('video-preview').innerHTML=''" style="margin-top:10px; cursor:pointer;">Đóng video</button>
+                </div>
             `;
+            // Cuộn màn hình lên chỗ video
+            preview.scrollIntoView({ behavior: 'smooth' });
         }
 
         // Tự động tải danh sách khi vào trang
