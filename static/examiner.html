@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cổng Thông Tin Giám Khảo</title>
+    <style>
+        body { font-family: sans-serif; max-width: 1000px; margin: 0 auto; padding: 20px; }
+        h1 { text-align: center; color: #333; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background-color: #f4f4f4; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        .btn-watch {
+            background-color: #007bff; color: white; padding: 8px 15px; 
+            text-decoration: none; border-radius: 4px;
+        }
+        .btn-watch:hover { background-color: #0056b3; }
+        video { max-width: 100%; display: none; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <h1>Danh Sách Bài Thi Phỏng Vấn</h1>
+    
+    <div id="video-preview" style="text-align:center; margin-bottom:20px;"></div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Tên Thí Sinh / File</th>
+                <th>Ngày Nộp</th>
+                <th>Kích thước</th>
+                <th>Hành động</th>
+            </tr>
+        </thead>
+        <tbody id="video-list">
+            </tbody>
+    </table>
+
+    <script>
+        async function loadVideos() {
+            try {
+                // Gọi API lấy danh sách từ server
+                const response = await fetch('/api/videos');
+                const videos = await response.json();
+                
+                const list = document.getElementById('video-list');
+                list.innerHTML = ''; // Xóa cũ
+
+                videos.forEach(vid => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td><strong>${vid.name}</strong></td>
+                        <td>${vid.created}</td>
+                        <td>${vid.size}</td>
+                        <td>
+                            <a href="#" class="btn-watch" onclick="playVideo('${vid.url}'); return false;">Xem ngay</a>
+                            <a href="${vid.url}" target="_blank" style="margin-left:10px;">Tải về</a>
+                        </td>
+                    `;
+                    list.appendChild(row);
+                });
+
+                if (videos.length === 0) {
+                    list.innerHTML = '<tr><td colspan="4" style="text-align:center">Chưa có video nào được nộp.</td></tr>';
+                }
+
+            } catch (err) {
+                console.error("Lỗi:", err);
+                alert("Không thể tải danh sách video.");
+            }
+        }
+
+        function playVideo(url) {
+            const preview = document.getElementById('video-preview');
+            preview.innerHTML = `
+                <h3>Đang xem: ${url.split('/').pop()}</h3>
+                <video controls autoplay style="display:block; max-height:400px; margin:0 auto;">
+                    <source src="${url}" type="video/webm">
+                    <source src="${url}" type="video/mp4">
+                    Trình duyệt không hỗ trợ thẻ video.
+                </video>
+            `;
+        }
+
+        // Tự động tải danh sách khi vào trang
+        loadVideos();
+    </script>
+
+</body>
+</html>
