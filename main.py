@@ -153,8 +153,8 @@ async def transcribe_video(filename: str):
         # 5. Trả về đường dẫn tải file
         return {
             "ok": True, 
-            "txt_filename": txt_filename,
-            "txt_url": f"/uploads/{txt_filename}" 
+            "text": transcript_text,          # <--- PHẦN NÀY ĐỂ HIỂN THỊ TRƯỚC
+            "txt_url": f"/uploads/{txt_filename}" # <--- PHẦN NÀY ĐỂ TẢI VỀ
         }
 
     except Exception as e:
