@@ -113,6 +113,7 @@ async def delete_all_videos():
     return {"ok": True}
 
 # --- API: TRANSCRIBE (GEMINI) ---
+
 @app.post("/api/transcribe/{filename}")
 async def transcribe_video(filename: str):
     file_path = UPLOAD_DIR / filename
@@ -131,18 +132,30 @@ async def transcribe_video(filename: str):
         if video_file.state.name == "FAILED":
             raise ValueError("Google failed to process video.")
 
-        # 3. Request Transcription (English Prompt)
-        # Dùng bản 2.0 Flash có trong danh sách của bạn
+        # 3. Request Transcription
         model = genai.GenerativeModel(model_name="gemini-2.0-flash")
         response = model.generate_content(
-            [video_file, "Listen to the video and provide a full transcript of the speech. Output only the text content, no introductory phrases."],
+            [video_file, "Listen to the video and provide a full transcript. Output only the text content."],
             request_options={"timeout": 600}
         )
-
-        # 4. Cleanup
         genai.delete_file(video_file.name)
 
-        return {"ok": True, "text": response.text}
+        # 4. LƯU RA FILE .TXT
+        transcript_text = response.text
+        # Đổi đuôi file từ .webm/.mp4 sang .txt
+        txt_filename = os.path.splitext(filename)[0] + ".txt"
+        txt_path = UPLOAD_DIR / txt_filename
+        
+        # Ghi file vào ổ đĩa
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write(transcript_text)
+
+        # 5. Trả về đường dẫn tải file
+        return {
+            "ok": True, 
+            "txt_filename": txt_filename,
+            "txt_url": f"/uploads/{txt_filename}" 
+        }
 
     except Exception as e:
         print(f"AI Error: {e}")
