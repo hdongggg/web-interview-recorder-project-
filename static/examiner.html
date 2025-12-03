@@ -97,28 +97,35 @@
             const box = document.getElementById(elementId);
             const originalText = btn.innerText;
             
-            btn.innerText = "⏳ Processing...";
+            // 1. Đổi trạng thái nút
+            btn.innerText = "⏳ Processing AI...";
             btn.disabled = true;
             btn.style.backgroundColor = "#999";
-
+            
             try {
                 const response = await fetch(`/api/transcribe/${filename}`, { method: 'POST' });
                 const result = await response.json();
 
                 if (response.ok) {
-                    // 1. Ẩn nút Transcribe đi
+                    // 2. Ẩn nút Transcribe cũ
                     btn.style.display = 'none';
                     
-                    // 2. Hiển thị nút Download File Text
+                    // 3. Hiện khung văn bản preview
                     box.style.display = 'block';
-                    box.style.border = 'none'; 
-                    box.style.backgroundColor = 'transparent';
-                    box.style.padding = '0';
+                    box.style.padding = '10px';
+                    box.style.backgroundColor = '#f1f8ff';
+                    box.style.border = '1px solid #cce5ff';
                     
+                    // 4. Set nội dung (Văn bản + Nút Download)
                     box.innerHTML = `
-                        <a href="${result.txt_url}" download="${result.txt_filename}" class="btn" style="background-color: #28a745; display: block; text-align: center; margin-top: 5px;">
-                            ⬇️ Download Transcript (.txt)
-                        </a>
+                        <div style="white-space: pre-wrap; line-height: 1.6; max-height: 200px; overflow-y: auto; margin-bottom: 10px;">
+                            ${result.text} 
+                        </div>
+                        <div style="text-align: right;">
+                            <a href="${result.txt_url}" download="${result.txt_filename}" class="btn" style="background-color: #28a745; font-size: 12px; padding: 4px 10px; margin-right: 0;">
+                                ⬇️ Download (.txt)
+                            </a>
+                        </div>
                     `;
                 } else {
                     alert("AI Error: " + result.detail);
