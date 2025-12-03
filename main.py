@@ -116,7 +116,7 @@ async def transcribe_video(filename: str):
             raise ValueError("Google failed to process video.")
 
         # 3. Request Transcription (English Prompt)
-        model = genai.GenerativeModel(model_name="gemini-1.5-flash-latest")
+        model = genai.GenerativeModel(model_name="gemini-1.5-flash-001")
         response = model.generate_content(
             [video_file, "Listen to the video and provide a full transcript of the speech. Output only the text content, no introductory phrases."],
             request_options={"timeout": 600}
