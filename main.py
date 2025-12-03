@@ -9,9 +9,9 @@ import time
 from datetime import datetime, timedelta  # <--- Thêm timedelta vào đây
 import google.generativeai as genai
 #Bổ sung gg cloud API
-from google.cloud import speech_v1p1beta1 as speech
-from google.cloud import storage
-from google.api_core import exceptions as gcp_exceptions
+# from google.cloud import speech_v1p1beta1 as speech
+# from google.cloud import storage
+# from google.api_core import exceptions as gcp_exceptions
 
 
 app = FastAPI(title="Interview System")
@@ -132,7 +132,7 @@ async def transcribe_video(filename: str):
             raise ValueError("Google failed to process video.")
 
         # 3. Request Transcription (English Prompt)
-        model = genai.GenerativeModel(model_name="gemini-1.5-flash-001")
+        model = genai.GenerativeModel(model_name="gemini-1.5-flash")
         response = model.generate_content(
             [video_file, "Listen to the video and provide a full transcript of the speech. Output only the text content, no introductory phrases."],
             request_options={"timeout": 600}
