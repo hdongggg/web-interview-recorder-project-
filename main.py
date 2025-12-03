@@ -68,30 +68,32 @@ async def upload_video(file: UploadFile = File(...)):
     return {"ok": True, "filename": safe_filename, "url": f"/uploads/{safe_filename}?v={datetime.now().timestamp()}"}
 
 # --- API: GET LIST ---
+# --- API: GET LIST (ĐÃ SỬA: CHỈ HIỆN FILE VIDEO, BỎ QUA .TXT) ---
 @app.get("/api/videos")
 async def get_all_videos():
     if not UPLOAD_DIR.is_dir(): return []
     videos = []
-    # Lấy danh sách file và sắp xếp mới nhất lên đầu
+    
     files = sorted(UPLOAD_DIR.iterdir(), key=lambda f: f.stat().st_mtime, reverse=True)
     
     for f in files:
         if f.is_file():
-            # 1. Lấy thời gian gốc (UTC) từ file
-            utc_time = datetime.utcfromtimestamp(f.stat().st_mtime)
+            # [LỌC MỚI] Chỉ thêm vào danh sách nếu file có đuôi là .webm hoặc .mp4
+            file_extension = os.path.splitext(f.name)[1].lower()
             
-            # 2. Cộng thêm 7 giờ để thành giờ Việt Nam
-            vn_time = utc_time + timedelta(hours=7)
-            
-            # 3. Định dạng lại cho đẹp (Ngày/Tháng/Năm Giờ:Phút)
-            formatted_time = vn_time.strftime("%d/%m/%Y %H:%M:%S")
+            if file_extension in ('.webm', '.mp4'): # Chỉ hiển thị file video chính
+                
+                # Logic chuyển đổi giờ VN (giữ nguyên)
+                utc_time = datetime.utcfromtimestamp(f.stat().st_mtime)
+                vn_time = utc_time + timedelta(hours=7)
+                formatted_time = vn_time.strftime("%d/%m/%Y %H:%M:%S")
 
-            videos.append({
-                "name": f.name,
-                "url": f"/uploads/{f.name}",
-                "size": f"{f.stat().st_size/1024/1024:.2f} MB",
-                "created": formatted_time # Đã là giờ Việt Nam
-            })
+                videos.append({
+                    "name": f.name,
+                    "url": f"/uploads/{f.name}",
+                    "size": f"{f.stat().st_size/1024/1024:.2f} MB",
+                    "created": formatted_time
+                })
     return videos
 
 # --- API: DELETE ONE ---
