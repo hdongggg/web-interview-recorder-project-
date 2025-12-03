@@ -25,7 +25,7 @@ app = FastAPI(title="Web Interview Recorder")
 # --- CẤU HÌNH ---
 # Token bí mật để đơn giản hóa xác thực
 SECRET_TOKEN = "SUPER_SECRET_PROJECT_TOKEN_123" 
-TIMEZONE = pytz.timezone('Asia/Bangkok') #
+TIMEZONE = pytz.timezone('Asia/Bangkok') # [cite: 60]
 UPLOAD_DIR = Path("/mnt/videos") # Đường dẫn Volume trên Railway
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -39,7 +39,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(_file_).parent
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
@@ -125,18 +125,18 @@ async def verify_token_endpoint(data: dict):
 
 @app.post("/api/session/start")
 async def session_start(data: SessionStart):
-    # Validate Token
+    # Validate Token [cite: 105]
     if data.token != SECRET_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid Token")
 
-    # Tạo tên thư mục: DD_MM_YYYY_HH_mm_ten_user
+    # Tạo tên thư mục: DD_MM_YYYY_HH_mm_ten_user 
     now = datetime.now(TIMEZONE)
     folder_name = f"{now.strftime('%d_%m_%Y_%H_%M')}_{sanitize_filename(data.userName)}"
     session_path = UPLOAD_DIR / folder_name
     
     try:
         session_path.mkdir(parents=True, exist_ok=False)
-        # Tạo metadata ban đầu
+        # Tạo metadata ban đầu [cite: 108]
         meta = {
             "userName": data.userName,
             "startTime": get_timestamp(),
@@ -161,7 +161,7 @@ async def upload_one(
     questionIndex: int = Form(...),
     video: UploadFile = File(...)
 ):
-    # Validate
+    # Validate [cite: 77]
     if token != SECRET_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid Token")
     
@@ -169,7 +169,7 @@ async def upload_one(
     if not session_path.exists():
         raise HTTPException(status_code=404, detail="Session folder not found")
 
-    # Save Video: Q{index}.webm
+    # Save Video: Q{index}.webm [cite: 92]
     filename = f"Q{questionIndex}.webm"
     file_path = session_path / filename
     
@@ -192,7 +192,7 @@ async def upload_one(
             with meta_path.open("w", encoding="utf-8") as f:
                 json.dump(meta, f, indent=4)
         
-        # Trigger STT Background Task (Bonus)
+        # Trigger STT Background Task (Bonus) [cite: 61]
         # Chỉ chạy nếu đã config Google Cloud credential trên server
         if HAS_GOOGLE_CLOUD:
             background_tasks.add_task(process_stt_background, file_path, filename, session_path, questionIndex)
