@@ -2,132 +2,228 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <title>Video Recorder</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hệ Thống Phỏng Vấn Tự Động</title>
     <style>
-        body { font-family: sans-serif; text-align: center; padding: 20px; }
-        #videoPlayer { border: 2px solid #3498db; margin: 20px auto; display: block; }
-        .controls button { padding: 10px 20px; margin: 5px; cursor: pointer; border: none; border-radius: 5px; }
-        #startBtn { background-color: #2ecc71; color: white; }
-        #stopBtn { background-color: #e74c3c; color: white; }
-        button:disabled { background-color: #bdc3c7; cursor: not-allowed; }
-        #status { margin-top: 15px; font-weight: bold; }
-        #resultContainer { margin-top: 30px; padding: 10px; border-top: 1px solid #ccc; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; padding: 20px; background-color: #f0f2f5; }
+        
+        /* Các màn hình (Step) */
+        .screen { display: none; max-width: 700px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .active { display: block; } /* Class để hiện màn hình đang dùng */
+
+        h1, h2 { color: #333; }
+        input[type="text"] { padding: 12px; width: 70%; margin: 10px 0; border: 1px solid #ccc; border-radius: 5px; font-size: 16px; }
+        
+        /* Khung Video */
+        #video-container { margin: 20px auto; border: 4px solid #3498db; border-radius: 8px; overflow: hidden; background: black; max-width: 640px;}
+        video { width: 100%; display: block; }
+
+        /* Nút bấm */
+        button { padding: 12px 24px; margin: 10px; cursor: pointer; border: none; border-radius: 5px; font-size: 16px; font-weight: bold; transition: 0.3s; }
+        .btn-primary { background-color: #3498db; color: white; }
+        .btn-record { background-color: #e74c3c; color: white; }
+        .btn-stop { background-color: #333; color: white; }
+        .btn-next { background-color: #2ecc71; color: white; display: none; } /* Mặc định ẩn nút Next */
+        
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+
+        .question-box { background: #e8f4fd; padding: 15px; border-left: 5px solid #3498db; margin-bottom: 20px; text-align: left; }
+        .status-log { margin-top: 15px; font-weight: bold; color: #555; }
     </style>
 </head>
 <body>
 
-    <h1>Webcam Recorder</h1>
-    <video id="videoPlayer" width="640" height="480" autoplay muted></video>
-
-    <div class="controls">
-        <button id="startBtn" disabled>🔴 Bắt Đầu Ghi</button>
-        <button id="stopBtn" disabled>⏹️ Dừng Ghi & Tải Lên</button>
+    <div id="screen-login" class="screen active">
+        <h1>👋 ChChào mừng đến với buổi phỏng vấn</h1>
+        <p>Vui lòng nhập họ và tên của bạn để bắt đầu.</p>
+        <input type="text" id="candidateName" placeholder="Ví dụ: Nguyễn Văn A">
+        <br>
+        <button class="btn-primary" onclick="startInterview()">Bắt Đầu Phỏng Vấn</button>
     </div>
 
-    <p id="status">Đang tải...</p>
+    <div id="screen-recorder" class="screen">
+        <div class="question-box">
+            <h3 id="question-title">Question 1:</h3>
+            <p id="question-content" style="font-size: 1.2em;">Nội dung câu hỏi...</p>
+        </div>
 
-    <div id="resultContainer"></div>
+        <div id="video-container">
+            <video id="videoPlayer" autoplay muted></video>
+        </div>
+
+        <div class="controls">
+            <button id="startBtn" class="btn-record" onclick="startRecording()">🔴 Bắt Đầu Trả Lời</button>
+            <button id="stopBtn" class="btn-stop" onclick="stopRecording()" disabled>⏹️ Dừng & Nộp Bài</button>
+            <button id="nextBtn" class="btn-next" onclick="nextQuestion()">➡️ Câu Hỏi Tiếp Theo</button>
+        </div>
+
+        <p id="status" class="status-log">Sẵn sàng...</p>
+    </div>
+
+    <div id="screen-finish" class="screen">
+        <h1 style="color: green;">🎉 Chúc mừng!</h1>
+        <h2>Bạn đã hoàn thành buổi phỏng vấn.</h2>
+        <p>Cảm ơn bạn đã tham gia. Bộ phận tuyển dụng sẽ liên hệ với bạn sớm.</p>
+        <button class="btn-primary" onclick="location.reload()">Quay về trang chủ</button>
+    </div>
 
     <script>
-        const videoPlayer = document.getElementById('videoPlayer');
-        const startBtn = document.getElementById('startBtn');
-        const stopBtn = document.getElementById('stopBtn');
-        const statusEl = document.getElementById('status');
-        const resultContainer = document.getElementById('resultContainer'); // Lấy phần tử mới
+        // --- CẤU HÌNH DỮ LIỆU ---
+        const QUESTIONS = [
+            "Hãy giới thiệu ngắn gọn về bản thân bạn?",
+            "Điểm mạnh và điểm yếu lớn nhất của bạn là gì?",
+            "Tại sao bạn lại muốn ứng tuyển vào vị trí này?",
+            "Hãy kể về một lần bạn gặp khó khăn trong công việc và cách bạn giải quyết?",
+            "Bạn mong muốn mức lương và chế độ đãi ngộ như thế nào?"
+        ];
 
-        // CHỈNH SỬA ĐỊA CHỈ NÀY KHI TRIỂN KHAI ONLINE
-        const UPLOAD_URL = 'https://web-interview-recorder-project-production.up.railway.app/api/upload';
-
+        let currentQuestionIndex = 0;
+        let candidateName = "";
         let mediaRecorder;
         let recordedChunks = [];
         let stream;
+        
+        // --- LOGIC CHUYỂN MÀN HÌNH ---
+        
+        async function startInterview() {
+            const input = document.getElementById('candidateName');
+            if (!input.value.trim()) {
+                alert("Vui lòng nhập tên của bạn!");
+                return;
+            }
+            // 1. Lưu tên và làm sạch (xóa dấu tiếng Việt, thay khoảng trắng bằng _)
+            candidateName = removeVietnameseTones(input.value.trim()).replace(/\s+/g, '_');
+            
+            // 2. Chuyển màn hình
+            document.getElementById('screen-login').classList.remove('active');
+            document.getElementById('screen-recorder').classList.add('active');
 
-        // 1. Khởi tạo Camera
+            // 3. Khởi động Camera & Load câu 1
+            await setupCamera();
+            loadQuestion(0);
+        }
+
+        function loadQuestion(index) {
+            // Cập nhật giao diện câu hỏi
+            document.getElementById('question-title').innerText = `Question ${index + 1} / ${QUESTIONS.length}`;
+            document.getElementById('question-content').innerText = QUESTIONS[index];
+            
+            // Reset nút bấm
+            document.getElementById('startBtn').style.display = 'inline-block';
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').style.display = 'inline-block';
+            document.getElementById('stopBtn').disabled = true;
+            document.getElementById('nextBtn').style.display = 'none'; // Ẩn nút Next
+            
+            document.getElementById('status').innerText = "Sẵn sàng ghi hình...";
+            document.getElementById('status').style.color = "#555";
+        }
+
+        function nextQuestion() {
+            currentQuestionIndex++;
+            
+            if (currentQuestionIndex < QUESTIONS.length) {
+                // Nếu còn câu hỏi -> Load câu tiếp theo
+                loadQuestion(currentQuestionIndex);
+            } else {
+                // Nếu hết câu hỏi -> Chuyển sang màn hình Finish
+                stopCamera();
+                document.getElementById('screen-recorder').classList.remove('active');
+                document.getElementById('screen-finish').classList.add('active');
+            }
+        }
+
+        // --- LOGIC CAMERA & RECORDING ---
+
         async function setupCamera() {
             try {
                 stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                videoPlayer.srcObject = stream;
-                statusEl.textContent = '✅ Camera sẵn sàng.';
-                startBtn.disabled = false;
-            } catch (error) {
-                statusEl.textContent = `❌ Lỗi: Không thể truy cập camera. Vui lòng chạy trên localhost hoặc HTTPS.`;
+                document.getElementById('videoPlayer').srcObject = stream;
+            } catch (err) {
+                alert("Không thể truy cập Camera. Vui lòng cấp quyền!");
             }
         }
 
-        // 2. Bắt đầu Ghi
-        startBtn.onclick = () => {
-            if (!stream) return;
-            mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
-            recordedChunks = [];
+        function stopCamera() {
+            if(stream) stream.getTracks().forEach(track => track.stop());
+        }
 
-            mediaRecorder.ondataavailable = (event) => {
+        function startRecording() {
+            recordedChunks = [];
+            mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+
+            mediaRecorder.ondataavailable = event => {
                 if (event.data.size > 0) recordedChunks.push(event.data);
             };
 
+            mediaRecorder.onstop = uploadVideo; // Khi dừng ghi -> Tự động upload
+
             mediaRecorder.start();
-            statusEl.textContent = '🔴 Đang ghi hình...';
-            startBtn.disabled = true;
-            stopBtn.disabled = false;
-            resultContainer.innerHTML = ''; // Xóa kết quả cũ khi bắt đầu ghi
-        };
+            
+            // Update UI
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
+            document.getElementById('status').innerText = "🔴 Đang ghi hình...";
+            document.getElementById('status').style.color = "red";
+        }
 
-        // 3. Dừng Ghi & Tải lên
-        stopBtn.onclick = () => {
+        function stopRecording() {
             mediaRecorder.stop();
-            statusEl.textContent = 'Đang dừng và chuẩn bị tải lên...';
-            startBtn.disabled = true;
-            stopBtn.disabled = true;
+            document.getElementById('stopBtn').disabled = true;
+            document.getElementById('status').innerText = "⏳ Đang xử lý và tải lên...";
+            document.getElementById('status').style.color = "orange";
+        }
 
-            mediaRecorder.onstop = () => {
-                const videoBlob = new Blob(recordedChunks, { type: 'video/webm' });
-                const filename = `response_video_${Date.now()}.webm`;
-                uploadVideo(videoBlob, filename);
+        async function uploadVideo() {
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            
+            // TẠO TÊN FILE: NguyenVanA_Question_1.webm
+            const filename = `${candidateName}_Question_${currentQuestionIndex + 1}.webm`;
 
-                // Dừng camera
-                stream.getTracks().forEach(track => track.stop());
-                videoPlayer.srcObject = null;
-            };
-        };
-
-        // 4. Hàm Tải lên Server
-        async function uploadVideo(videoBlob, filename) {
             const formData = new FormData();
-            formData.append('file', videoBlob, filename);
+            formData.append('file', blob, filename); // Gửi tên file kèm theo
 
             try {
-                const response = await fetch(UPLOAD_URL, {
+                const response = await fetch('/api/upload', {
                     method: 'POST',
-                    body: formData,
+                    body: formData
                 });
 
-                const result = await response.json();
-
                 if (response.ok) {
-                    const videoUrl = result.url; // Lấy đường dẫn video từ server (ví dụ: /uploads/ten_file.webm)
+                    document.getElementById('status').innerText = "✅ Đã nộp bài thành công!";
+                    document.getElementById('status').style.color = "green";
 
-                    statusEl.textContent = `✅ Tải lên thành công!`;
-
-                    // Hiển thị video đã ghi và link xem
-                    resultContainer.innerHTML =
-                        `<h3>Video đã ghi</h3>
-                         <video src="${videoUrl}" width="400" height="300" controls></video>
-                         <p>Đường dẫn công khai: <a href="${videoUrl}" target="_blank">${videoUrl}</a></p>`;
-
+                    // Ẩn nút Record/Stop, Hiện nút Next
+                    document.getElementById('startBtn').style.display = 'none';
+                    document.getElementById('stopBtn').style.display = 'none';
+                    document.getElementById('nextBtn').style.display = 'inline-block';
                 } else {
-                    statusEl.textContent = `❌ Lỗi: ${result.detail || response.statusText}`;
-                    resultContainer.innerHTML = `<p>Lỗi tải lên. Vui lòng kiểm tra Log Render.</p>`;
+                    throw new Error("Lỗi Server");
                 }
             } catch (error) {
-                statusEl.textContent = `❌ Lỗi mạng: Không kết nối được tới server.`;
-                resultContainer.innerHTML = `<p>Lỗi mạng. Vui lòng kiểm tra server online đã chạy chưa.</p>`;
-            } finally {
-                startBtn.disabled = false;
-                stopBtn.disabled = true;
-                setupCamera();
+                document.getElementById('status').innerText = "❌ Lỗi tải lên. Vui lòng thử lại.";
+                document.getElementById('startBtn').disabled = false; // Cho phép quay lại
             }
         }
 
-        setupCamera();
+        // Hàm tiện ích: Chuyển Tiếng Việt có dấu thành không dấu
+        function removeVietnameseTones(str) {
+            str = str.replace(/à|á|ạ|ả|ã|â|ầ|ấ|ậ|ẩ|ẫ|ă|ằ|ắ|ặ|ẳ|ẵ/g,"a"); 
+            str = str.replace(/è|é|ẹ|ẻ|ẽ|ê|ề|ế|ệ|ể|ễ/g,"e"); 
+            str = str.replace(/ì|í|ị|ỉ|ĩ/g,"i"); 
+            str = str.replace(/ò|ó|ọ|ỏ|õ|ô|ồ|ố|ộ|ổ|ỗ|ơ|ờ|ớ|ợ|ở|ỡ/g,"o"); 
+            str = str.replace(/ù|ú|ụ|ủ|ũ|ư|ừ|ứ|ự|ử|ữ/g,"u"); 
+            str = str.replace(/ỳ|ý|ỵ|ỷ|ỹ/g,"y"); 
+            str = str.replace(/đ/g,"d");
+            str = str.replace(/À|Á|Ạ|Ả|Ã|Â|Ầ|Ấ|Ậ|Ẩ|Ẫ|Ă|Ằ|Ắ|Ặ|Ẳ|Ẵ/g, "A");
+            str = str.replace(/È|É|Ẹ|Ẻ|Ẽ|Ê|Ề|Ế|Ệ|Ể|Ễ/g, "E");
+            str = str.replace(/Ì|Í|Ị|Ỉ|Ĩ/g, "I");
+            str = str.replace(/Ò|Ó|Ọ|Ỏ|Õ|Ô|Ồ|Ố|Ộ|Ổ|Ỗ|Ơ|Ờ|Ớ|Ợ|Ở|Ỡ/g, "O");
+            str = str.replace(/Ù|Ú|Ụ|Ủ|Ũ|Ư|Ừ|Ứ|Ự|Ử|Ữ/g, "U");
+            str = str.replace(/Ỳ|Ý|Ỵ|Ỷ|Ỹ/g, "Y");
+            str = str.replace(/Đ/g, "D");
+            return str;
+        }
     </script>
 </body>
 </html>
