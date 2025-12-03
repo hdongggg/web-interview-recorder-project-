@@ -104,6 +104,7 @@
             } catch (err) { console.error(err); }
         }
 
+        // --- HÀM GỌI API GEMINI (ĐÃ THÊM .trim()) ---
         async function transcribeVideo(filename, elementId, btn) {
             const box = document.getElementById(elementId);
             const originalText = btn.innerText;
@@ -111,20 +112,23 @@
             btn.innerText = "⏳ Processing AI...";
             btn.disabled = true;
             btn.style.backgroundColor = "#999";
-
+        
             try {
                 const response = await fetch(`/api/transcribe/${filename}`, { method: 'POST' });
                 const result = await response.json();
-
+        
                 if (response.ok) {
-                    // Ẩn nút Transcribe
+                    // [SỬA QUAN TRỌNG] Cắt khoảng trắng thừa ở đầu và cuối chuỗi
+                    const trimmedText = result.text.trim(); 
+        
+                    // Ẩn nút Transcribe đi
                     btn.style.display = 'none';
                     
-                    // Hiển thị khung văn bản đã được tối ưu
+                    // Hiển thị khung văn bản (sử dụng text đã cắt)
                     box.style.display = 'block';
                     box.innerHTML = `
                         <div class="transcript-content">
-                            ${result.text}
+                            ${trimmedText} 
                         </div>
                         <div style="text-align: right;">
                             <a href="${result.txt_url}" download="${result.txt_filename}" class="btn btn-download-small">
