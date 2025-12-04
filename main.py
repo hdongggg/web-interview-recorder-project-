@@ -56,7 +56,7 @@ def process_video_background(filename: str, duration: float):
 
     # --- [MỚI] KIỂM TRA THỜI GIAN NGAY TỪ ĐẦU ---
     if duration < 5:
-        print(f"⚠️ Video quá ngắn ({duration}s). Bỏ qua AI.")
+        print(f"⚠️ Video too short ({duration}s). Skip AI.")
         result_data = {
             "filename": filename,
             "question": question_text,
