@@ -7,36 +7,14 @@ import shutil
 import os
 import time
 import json
-import subprocess
 from datetime import datetime, timedelta
-
-# --- THƯ VIỆN GOOGLE ---
 import google.generativeai as genai
-from google.cloud import speech
-from google.oauth2 import service_account
 
-app = FastAPI(title="AI Interviewer - Hybrid Architecture")
+app = FastAPI(title="AI Interviewer")
 
-# --- 1. CẤU HÌNH API & CREDENTIALS ---
-
-# A. Cấu hình Gemini (Để chấm điểm)
-GOOGLE_API_KEY = "AIzaSyD7d78Goxctsn7OohpVKp-ggUT3jgC9tZs" 
+# --- CẤU HÌNH API KEY (QUAN TRỌNG) ---
+GOOGLE_API_KEY = "AIzaSyD7d78Goxctsn7OohpVKp-ggUT3jgC9tZs" # <--- DÁN KEY CỦA BẠN VÀO ĐÂY
 genai.configure(api_key=GOOGLE_API_KEY)
-
-# B. Cấu hình Google Cloud Speech (Để gỡ băng) - Lấy từ biến môi trường Railway
-creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
-speech_credentials = None
-
-if creds_json:
-    try:
-        creds_dict = json.loads(creds_json)
-        speech_credentials = service_account.Credentials.from_service_account_info(creds_dict)
-        print("✅ Google Cloud Credentials loaded successfully.")
-    except Exception as e:
-        print(f"⚠️ Error loading credentials: {e}")
-else:
-    print("⚠️ WARNING: Missing GOOGLE_CREDENTIALS_JSON env var for Speech-to-Text!")
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -45,11 +23,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- DIRECTORIES ---
 UPLOAD_DIR = Path("/mnt/videos")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-AUDIO_DIR = Path("/mnt/audios") # Thư mục tạm cho audio
-AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
 BASE_DIR = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
@@ -63,31 +38,10 @@ QUESTIONS_DB = {
     5: "What are your salary expectations?"
 }
 
-# --- HÀM TÁCH AUDIO (FFMPEG) ---
-def extract_audio(video_path: Path) -> Path:
-    """Tách audio từ video file"""
-    filename = video_path.stem
-    audio_path = AUDIO_DIR / f"{filename}.mp3"
-    
-    # Lệnh ffmpeg chuyển webm -> mp3 (16k mono để tối ưu cho Speech API)
-    command = [
-        "ffmpeg", "-y", "-i", str(video_path), 
-        "-vn", "-acodec", "libmp3lame", "-ar", "16000", "-ac", "1", 
-        str(audio_path)
-    ]
-    try:
-        subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return audio_path
-    except Exception as e:
-        print(f"⚠️ FFmpeg Error: {e}")
-        return None
-
-# --- PIPELINE XỬ LÝ CHÍNH ---
+# --- HÀM XỬ LÝ BACKGROUND TỐI ƯU (1 BƯỚC) ---
 def process_video_background(filename: str):
-    print(f"🚀 [Start Pipeline] Processing {filename}")
-    
-    video_path = UPLOAD_DIR / filename
-    json_path = UPLOAD_DIR / (os.path.splitext(filename)[0] + ".json")
+    print(f"🚀 [Start] AI Grading: {filename}")
+    file_path = UPLOAD_DIR / filename
     
     # 1. Xác định câu hỏi
     try:
@@ -95,93 +49,73 @@ def process_video_background(filename: str):
         q_num = int(parts[1].split(".")[0])
         question_text = QUESTIONS_DB.get(q_num, "General Question")
     except:
-        q_num = 0
         question_text = "General Question"
 
     try:
-        # BƯỚC 1: EXTRACT AUDIO
-        audio_path = extract_audio(video_path)
-        if not audio_path:
-            raise Exception("Failed to extract audio from video.")
+        # 2. Upload lên Google
+        video_file = genai.upload_file(path=file_path, display_name=filename)
+        
+        # Đợi Google xử lý video (Bắt buộc)
+        while video_file.state.name == "PROCESSING":
+            time.sleep(1)
+            video_file = genai.get_file(video_file.name)
+        
+        if video_file.state.name == "FAILED": 
+            print(f"❌ [Fail] Google cannot process {filename}")
+            return
 
-        # BƯỚC 2: SPEECH TO TEXT (Google Cloud)
-        transcript_text = ""
-        if speech_credentials:
-            client = speech.SpeechClient(credentials=speech_credentials)
-            with open(audio_path, "rb") as f:
-                content = f.read()
-            
-            audio = speech.RecognitionAudio(content=content)
-            config = speech.RecognitionConfig(
-                encoding=speech.RecognitionConfig.AudioEncoding.MP3,
-                sample_rate_hertz=16000,
-                language_code="en-US",
-                enable_automatic_punctuation=True
-            )
-            
-            print("☁️ Calling Google Speech API...")
-            response = client.recognize(config=config, audio=audio)
-            
-            for result in response.results:
-                transcript_text += result.alternatives[0].transcript + " "
-        else:
-            transcript_text = "(System Error: Missing Google Cloud Credentials)"
-
-        # Dọn dẹp file audio tạm
-        if audio_path.exists():
-            audio_path.unlink()
-
-        print(f"📝 Transcript: {transcript_text[:50]}...")
-
-        # BƯỚC 3: GRADING (Gemini)
-        model = genai.GenerativeModel("gemini-2.0-flash")
+        # 3. GỌI GEMINI 1 LẦN DUY NHẤT (Vừa lấy Text, Vừa Chấm) -> NHANH HƠN
+        model = genai.GenerativeModel(model_name="gemini-2.0-flash")
         
         prompt = f"""
-        Act as a Recruiter.
-        Question: "{question_text}"
-        Candidate Answer: "{transcript_text}"
+        Act as a Professional Recruiter.
+        The candidate is answering: "{question_text}"
         
         Task:
-        1. Score (1-10).
-        2. Short comment (max 20 words).
+        1. Transcribe the answer verbatim.
+        2. Score it (1-10), give comments.
         
-        Output JSON: {{ "score": 0, "comment": "..." }}
+        Return JSON structure:
+        {{
+            "transcript": "...",
+            "score": 0,
+            "comment": "Short feedback (max 20 words)"
+        }}
         """
+
         
-        print("🧠 Grading with Gemini...")
-        grading_res = model.generate_content(
-            prompt,
+        response = model.generate_content(
+            [video_file, prompt],
             generation_config={"response_mime_type": "application/json"}
         )
         
-        data = json.loads(grading_res.text)
+        # Xóa file ngay sau khi xong
+        genai.delete_file(video_file.name)
 
-        # LƯU KẾT QUẢ
+        # 4. Xử lý kết quả JSON
+        raw_text = response.text.strip()
+        if raw_text.startswith("```json"):
+            raw_text = raw_text.replace("```json", "").replace("```", "")
+            
+        data = json.loads(raw_text)
+
+        # 5. Lưu File JSON Kết quả
         result_data = {
             "filename": filename,
             "question": question_text,
-            "transcript": transcript_text.strip(),
+            "transcript": data.get("transcript", "No transcript"),
             "score": data.get("score", 0),
             "comment": data.get("comment", "No comment")
         }
         
+        json_path = UPLOAD_DIR / (os.path.splitext(filename)[0] + ".json")
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(result_data, f, ensure_ascii=False)
             
-        print(f"✅ [Done] Score: {result_data['score']}")
+        print(f"✅ [Done] {filename} -> Score: {result_data['score']}")
 
     except Exception as e:
         print(f"❌ [Error] {filename}: {e}")
-        # Lưu file lỗi để Frontend hiển thị
-        error_data = {
-            "filename": filename,
-            "question": question_text,
-            "transcript": f"Error: {str(e)}",
-            "score": 0,
-            "comment": "System Error. Please check server logs."
-        }
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(error_data, f)
 
 # --- API ROUTES ---
 
@@ -194,21 +128,13 @@ async def examiner(): return (BASE_DIR / "static" / "examiner.html").read_text(e
 @app.post("/api/upload")
 async def upload_video(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     filename = file.filename
-    # Làm sạch tên file để tránh lỗi path
     safe_filename = "".join(c for c in filename if c.isalnum() or c in "._-")
     dest = UPLOAD_DIR / safe_filename
 
-    # LOGIC GHI ĐÈ: Xóa file JSON cũ nếu tồn tại (để Frontend biết đang chấm lại)
-    json_path = UPLOAD_DIR / (os.path.splitext(safe_filename)[0] + ".json")
-    if json_path.exists():
-        json_path.unlink()
-
     try:
-        # Lưu file video (Tự động ghi đè nếu trùng tên)
         with dest.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        
-        # Gọi Pipeline xử lý
+        # Kích hoạt background task
         background_tasks.add_task(process_video_background, safe_filename)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -220,21 +146,22 @@ async def get_results(cname: str):
     if not UPLOAD_DIR.is_dir(): return {"completed": False}
     
     results = []
-    # Tìm file JSON theo tên người dùng
+    # Quét tất cả file json của user này
     for f in UPLOAD_DIR.glob(f"{cname}_Question_*.json"):
         try:
             with open(f, "r", encoding="utf-8") as jf:
                 results.append(json.load(jf))
         except: pass
     
-    results.sort(key=lambda x: x.get('filename', ''))
+    results.sort(key=lambda x: x['filename'])
     
+    # Tính điểm trung bình
     avg = 0
     if results:
-        avg = round(sum(r.get('score', 0) for r in results) / len(results), 1)
+        avg = round(sum(r['score'] for r in results) / len(results), 1)
 
     return {
-        "completed": len(results) >= 5, 
+        "completed": len(results) >= 5, # Kiểm tra đủ 5 câu
         "count": len(results),
         "avg_score": avg,
         "details": results
@@ -285,3 +212,5 @@ async def delete_video(filename: str):
     (UPLOAD_DIR / filename).unlink(missing_ok=True)
     (UPLOAD_DIR / (os.path.splitext(filename)[0] + ".json")).unlink(missing_ok=True)
     return {"ok": True}
+
+
