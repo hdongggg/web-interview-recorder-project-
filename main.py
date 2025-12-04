@@ -12,8 +12,8 @@ import google.generativeai as genai
 
 app = FastAPI(title="AI Interviewer")
 
-# --- CẤU HÌNH API KEY (QUAN TRỌNG) ---
-GOOGLE_API_KEY = "AIzaSyD7d78Goxctsn7OohpVKp-ggUT3jgC9tZs" # <--- DÁN KEY CỦA BẠN VÀO ĐÂY
+# --- CẤU HÌNH ---
+GOOGLE_API_KEY = "AIzaSy......" # <--- THAY KEY CỦA BẠN VÀO ĐÂY
 genai.configure(api_key=GOOGLE_API_KEY)
 
 app.add_middleware(
@@ -38,106 +38,114 @@ QUESTIONS_DB = {
     5: "What are your salary expectations?"
 }
 
-# --- HÀM XỬ LÝ BACKGROUND TỐI ƯU (1 BƯỚC) ---
+# --- HÀM CHẠY NGẦM (QUY TRÌNH 2 BƯỚC: STT -> TEXT -> GRADING) ---
 def process_video_background(filename: str):
-    start_time = time.time() # Bắt đầu tính giờ
-    print(f"🔄 [Background] Grading: {filename}...")
+    print(f"🚀 [Step 1] Start Processing: {filename}")
     file_path = UPLOAD_DIR / filename
     
-    # 1. Lấy nội dung câu hỏi
+    # Lấy câu hỏi
     try:
         parts = filename.split("_Question_")
         q_num = int(parts[1].split(".")[0])
-        question_text = QUESTIONS_DB.get(q_num, "General Interview Question")
-    except Exception:
-        question_text = "General Interview Question"
+        question_text = QUESTIONS_DB.get(q_num, "General Question")
+    except:
+        question_text = "General Question"
 
-    # Bắt lỗi Timeout và các lỗi khác
     try:
-        # 1. Upload Video
+        # --- BƯỚC 1: SPEECH TO TEXT (STT) ---
+        
+        # 1.1 Upload Video
         video_file = genai.upload_file(path=file_path, display_name=filename)
         
-        # 2. Wait for processing (Kiểm tra Timeout trong vòng lặp)
+        # 1.2 Chờ Google xử lý (Bắt buộc)
         while video_file.state.name == "PROCESSING":
-            if time.time() - start_time > GRADING_TIMEOUT:
-                # Nếu quá 30 giây -> Báo lỗi Timeout
-                raise TimeoutError("Processing exceeded time limit.")
             time.sleep(1)
             video_file = genai.get_file(video_file.name)
-            
+        
         if video_file.state.name == "FAILED": 
             print("❌ Google failed to read video.")
             return
 
-        # 3. Grading Call (Kiểm tra lần cuối trước khi gọi AI)
-        if time.time() - start_time > GRADING_TIMEOUT:
-            raise TimeoutError("Grading API call exceeded time limit.")
-
+        # 1.3 Gọi Gemini lấy Transcript (Chỉ lấy chữ)
         model = genai.GenerativeModel(model_name="gemini-2.0-flash")
         
-        prompt = f"""
+        print(f"🎤 [Step 1] Transcribing...")
+        stt_response = model.generate_content(
+            [video_file, "Transcribe the audio in this video verbatim. Output ONLY the raw text."],
+            request_options={"timeout": 600}
+        )
+        
+        # Lấy kết quả Text
+        transcript_text = stt_response.text.strip()
+        print(f"📝 [Step 1] Transcript done (Len: {len(transcript_text)})")
+
+        # [QUAN TRỌNG] Xóa file video trên cloud NGAY LẬP TỨC để nhẹ gánh
+        genai.delete_file(video_file.name)
+
+
+        # --- BƯỚC 2: CHẤM ĐIỂM TRÊN VĂN BẢN (TEXT-BASED GRADING) ---
+        
+        print(f"🧠 [Step 2] Grading text...")
+        
+        prompt_grading = f"""
         Act as a Professional Recruiter.
-        The candidate is answering: "{question_text}"
         
-        Task:
-        1. Transcribe it.
-        2. Score it (1-10), give comments.
+        Question: "{question_text}"
+        Candidate's Answer (Text): "{transcript_text}"
         
-        Return JSON structure:
+        Task: Evaluate the answer on a scale of 1-10.
+        
+        Return ONLY a JSON object:
         {{
-            "transcript": "...",
             "score": 0,
-            "comment": "Short feedback (max 20 words)"
+            "comment": "Short feedback (max 15 words)"
         }}
         """
         
-        response = model.generate_content(
-            [video_file, prompt],
+        # Gửi Text đi chấm (Rất nhanh)
+        grading_response = model.generate_content(
+            prompt_grading,
             generation_config={"response_mime_type": "application/json"}
         )
-        
-        # 4. Dọn dẹp Cloud và Lưu kết quả
-        genai.delete_file(video_file.name)
 
-        # Xử lý JSON (đã bao gồm robust parsing)
-        raw_text = response.text.strip()
-        if raw_text.startswith("```json"):
-            raw_text = raw_text.replace("```json", "").replace("```", "")
-        
-        grade_data = json.loads(raw_text)
+        # Xử lý JSON kết quả
+        raw_json = grading_response.text.strip()
+        if raw_json.startswith("```json"):
+            raw_json = raw_json.replace("```json", "").replace("```", "")
+            
+        grade_data = json.loads(raw_json)
 
+        # --- LƯU KẾT QUẢ CUỐI CÙNG ---
         result_data = {
             "filename": filename,
             "question": question_text,
-            "transcript": grade_data.get("transcript", "Transcription unavailable."),
-            "score": grade_data.get("score", 0),
-            "comment": grade_data.get("comment", "No comment available.")
+            "transcript": transcript_text, # Text lấy từ Bước 1
+            "score": grade_data.get("score", 0), # Điểm lấy từ Bước 2
+            "comment": grade_data.get("comment", "No comment")
         }
         
         json_path = UPLOAD_DIR / (os.path.splitext(filename)[0] + ".json")
         with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(result_data, f, ensure_ascii=False, indent=2)
+            json.dump(result_data, f, ensure_ascii=False)
             
-        print(f"✅ [Done] {filename}: Score {result_data['score']}/10. Time: {time.time() - start_time:.2f}s")
+        print(f"✅ [Finish] {filename} -> Score: {result_data['score']}")
 
-    except TimeoutError:
-        print(f"⏰ [TIMEOUT] Processing {filename} exceeded {GRADING_TIMEOUT}s. Saving default score.")
-        
-        # Cố gắng xóa file trên Google Cloud
-        try:
-            if 'video_file' in locals():
-                genai.delete_file(video_file.name)
-        except Exception:
-            pass
-            
-        # Lưu kết quả mặc định (Timeout)
-        result_data = {"filename": filename, "transcript": "TIMEOUT: AI processing took too long.", "score": 0, "comment": "System timeout: Processing exceeded 30 seconds."}
-        json_path = UPLOAD_DIR / (os.path.splitext(filename)[0] + ".json")
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(result_data, f, ensure_ascii=False, indent=2)
-            
     except Exception as e:
-        print(f"❌ [FATAL ERROR] An unexpected error occurred while processing {filename}: {e}")
+        print(f"❌ [Error] {filename}: {e}")
+        # Nếu lỗi, cố gắng tạo file JSON báo lỗi để Frontend không bị treo
+        error_data = {
+            "filename": filename, 
+            "question": question_text,
+            "transcript": "Error processing video.", 
+            "score": 0, 
+            "comment": "AI Processing Failed."
+        }
+        try:
+            json_path = UPLOAD_DIR / (os.path.splitext(filename)[0] + ".json")
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(error_data, f)
+        except: pass
+
 # --- API ROUTES ---
 
 @app.get("/", response_class=HTMLResponse)
@@ -155,7 +163,7 @@ async def upload_video(background_tasks: BackgroundTasks, file: UploadFile = Fil
     try:
         with dest.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        # Kích hoạt background task
+        # Chạy ngầm quy trình 2 bước
         background_tasks.add_task(process_video_background, safe_filename)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -167,7 +175,6 @@ async def get_results(cname: str):
     if not UPLOAD_DIR.is_dir(): return {"completed": False}
     
     results = []
-    # Quét tất cả file json của user này
     for f in UPLOAD_DIR.glob(f"{cname}_Question_*.json"):
         try:
             with open(f, "r", encoding="utf-8") as jf:
@@ -176,13 +183,13 @@ async def get_results(cname: str):
     
     results.sort(key=lambda x: x['filename'])
     
-    # Tính điểm trung bình
+    # Tính trung bình
     avg = 0
     if results:
         avg = round(sum(r['score'] for r in results) / len(results), 1)
 
     return {
-        "completed": len(results) >= 5, # Kiểm tra đủ 5 câu
+        "completed": len(results) >= 5, 
         "count": len(results),
         "avg_score": avg,
         "details": results
