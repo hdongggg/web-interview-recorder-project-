@@ -98,7 +98,7 @@ def process_video_background(filename: str):
         + For question 2: Interview candidate need to give at least 1 strength and 1 weakness to evaluate, strengths with proof get higher score, and a real weakness, the candidate need to understand the impact of the weakness and concrete improvement actions
         + For question 3: Candidate need to accurate understanding the position, have genuine intrinsic motivation and fit for the role. Other factors are pluses
         + For question 4: Candidate need to give a meaningful challenge, give root-cause analysis, logical and actionable solution for the challenge and indicate clear lesson learned
-        + For question 5: 
+        + For question 5: Salary need to suitable, in range of 10 million VND to 25 million VND
 
         
         Question: "{question_text}"
