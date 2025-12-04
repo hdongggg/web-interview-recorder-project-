@@ -40,32 +40,40 @@ QUESTIONS_DB = {
 
 # --- HÀM XỬ LÝ BACKGROUND TỐI ƯU (1 BƯỚC) ---
 def process_video_background(filename: str):
-    print(f"🚀 [Start] AI Grading: {filename}")
+    start_time = time.time() # Bắt đầu tính giờ
+    print(f"🔄 [Background] Grading: {filename}...")
     file_path = UPLOAD_DIR / filename
     
-    # 1. Xác định câu hỏi
+    # 1. Lấy nội dung câu hỏi
     try:
         parts = filename.split("_Question_")
         q_num = int(parts[1].split(".")[0])
-        question_text = QUESTIONS_DB.get(q_num, "General Question")
-    except:
-        question_text = "General Question"
+        question_text = QUESTIONS_DB.get(q_num, "General Interview Question")
+    except Exception:
+        question_text = "General Interview Question"
 
+    # Bắt lỗi Timeout và các lỗi khác
     try:
-        # 2. Upload lên Google
+        # 1. Upload Video
         video_file = genai.upload_file(path=file_path, display_name=filename)
         
-        # Đợi Google xử lý video (Bắt buộc)
+        # 2. Wait for processing (Kiểm tra Timeout trong vòng lặp)
         while video_file.state.name == "PROCESSING":
+            if time.time() - start_time > GRADING_TIMEOUT:
+                # Nếu quá 30 giây -> Báo lỗi Timeout
+                raise TimeoutError("Processing exceeded time limit.")
             time.sleep(1)
             video_file = genai.get_file(video_file.name)
-        
+            
         if video_file.state.name == "FAILED": 
-            print(f"❌ [Fail] Google cannot process {filename}")
+            print("❌ Google failed to read video.")
             return
 
-        # 3. GỌI GEMINI 1 LẦN DUY NHẤT (Vừa lấy Text, Vừa Chấm) -> NHANH HƠN
-        model = genai.GenerativeModel(model_name="gemini-2.-flash")
+        # 3. Grading Call (Kiểm tra lần cuối trước khi gọi AI)
+        if time.time() - start_time > GRADING_TIMEOUT:
+            raise TimeoutError("Grading API call exceeded time limit.")
+
+        model = genai.GenerativeModel(model_name="gemini-2.0-flash")
         
         prompt = f"""
         Act as a Professional Recruiter.
@@ -82,41 +90,54 @@ def process_video_background(filename: str):
             "comment": "Short feedback (max 20 words)"
         }}
         """
-
         
         response = model.generate_content(
             [video_file, prompt],
             generation_config={"response_mime_type": "application/json"}
         )
         
-        # Xóa file ngay sau khi xong
+        # 4. Dọn dẹp Cloud và Lưu kết quả
         genai.delete_file(video_file.name)
 
-        # 4. Xử lý kết quả JSON
+        # Xử lý JSON (đã bao gồm robust parsing)
         raw_text = response.text.strip()
         if raw_text.startswith("```json"):
             raw_text = raw_text.replace("```json", "").replace("```", "")
-            
-        data = json.loads(raw_text)
+        
+        grade_data = json.loads(raw_text)
 
-        # 5. Lưu File JSON Kết quả
         result_data = {
             "filename": filename,
             "question": question_text,
-            "transcript": data.get("transcript", "No transcript"),
-            "score": data.get("score", 0),
-            "comment": data.get("comment", "No comment")
+            "transcript": grade_data.get("transcript", "Transcription unavailable."),
+            "score": grade_data.get("score", 0),
+            "comment": grade_data.get("comment", "No comment available.")
         }
         
         json_path = UPLOAD_DIR / (os.path.splitext(filename)[0] + ".json")
         with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(result_data, f, ensure_ascii=False)
+            json.dump(result_data, f, ensure_ascii=False, indent=2)
             
-        print(f"✅ [Done] {filename} -> Score: {result_data['score']}")
+        print(f"✅ [Done] {filename}: Score {result_data['score']}/10. Time: {time.time() - start_time:.2f}s")
 
+    except TimeoutError:
+        print(f"⏰ [TIMEOUT] Processing {filename} exceeded {GRADING_TIMEOUT}s. Saving default score.")
+        
+        # Cố gắng xóa file trên Google Cloud
+        try:
+            if 'video_file' in locals():
+                genai.delete_file(video_file.name)
+        except Exception:
+            pass
+            
+        # Lưu kết quả mặc định (Timeout)
+        result_data = {"filename": filename, "transcript": "TIMEOUT: AI processing took too long.", "score": 0, "comment": "System timeout: Processing exceeded 30 seconds."}
+        json_path = UPLOAD_DIR / (os.path.splitext(filename)[0] + ".json")
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(result_data, f, ensure_ascii=False, indent=2)
+            
     except Exception as e:
-        print(f"❌ [Error] {filename}: {e}")
-
+        print(f"❌ [FATAL ERROR] An unexpected error occurred while processing {filename}: {e}")
 # --- API ROUTES ---
 
 @app.get("/", response_class=HTMLResponse)
