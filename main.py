@@ -17,7 +17,7 @@ app = FastAPI(title="AI Interviewer Pro")
 GOOGLE_API_KEY = "AIzaSyD7d78Goxctsn7OohpVKp-ggUT3jgC9tZs" 
 genai.configure(api_key=GOOGLE_API_KEY)
 
-# Cấu hình múi giờ Việt Nam (UTC+7)
+# Múi giờ VN
 VN_TZ = timezone(timedelta(hours=7))
 
 app.add_middleware(
@@ -47,14 +47,14 @@ def process_video_background(filename: str, q_num: int):
     print(f"🚀 [Start AI] Analyzing {filename} (Question {q_num})")
     file_path = UPLOAD_DIR / filename
     
-    # Lấy nội dung câu hỏi từ Database
+    # Lấy nội dung câu hỏi
     question_text = QUESTIONS_DB.get(q_num, "General Interview Question")
 
     try:
         # A. Upload video lên Google
         video_file = genai.upload_file(path=file_path, display_name=filename)
         
-        # B. Đợi Google xử lý (Polling state)
+        # B. Đợi Google xử lý
         while video_file.state.name == "PROCESSING":
             time.sleep(2)
             video_file = genai.get_file(video_file.name)
@@ -62,8 +62,9 @@ def process_video_background(filename: str, q_num: int):
         if video_file.state.name == "FAILED":
             raise ValueError("Google AI failed to process the video file.")
 
-        # C. Gọi Model (Dùng 1.5-flash cho ổn định và nhanh)
-        model = genai.GenerativeModel(model_name="gemini-1.5-flash")
+        # C. Gọi Model - SỬ DỤNG 'gemini-1.5-flash-latest' HOẶC 'gemini-pro' ĐỂ AN TOÀN
+        # Nếu vẫn lỗi 404, hãy thử đổi thành "gemini-pro"
+        model = genai.GenerativeModel(model_name="gemini-1.5-flash-latest")
         
         prompt = f"""
         You are an expert HR Recruiter.
@@ -87,13 +88,10 @@ def process_video_background(filename: str, q_num: int):
             generation_config={"response_mime_type": "application/json"}
         )
         
-        # D. Dọn dẹp file trên cloud
         genai.delete_file(video_file.name)
-
-        # E. Parse kết quả
         data = json.loads(response.text)
 
-        # F. Lưu kết quả
+        # D. Lưu kết quả THÀNH CÔNG
         result_data = {
             "filename": filename,
             "question_index": q_num,
@@ -104,7 +102,6 @@ def process_video_background(filename: str, q_num: int):
             "timestamp": datetime.now(VN_TZ).strftime("%Y-%m-%d %H:%M:%S")
         }
         
-        # Lưu file JSON trùng tên với video
         json_path = UPLOAD_DIR / (os.path.splitext(filename)[0] + ".json")
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(result_data, f, ensure_ascii=False, indent=2)
@@ -113,11 +110,14 @@ def process_video_background(filename: str, q_num: int):
 
     except Exception as e:
         print(f"❌ [Error] {filename}: {e}")
-        # Tạo file JSON báo lỗi để không bị treo ở trạng thái "Grading..."
+        # E. Lưu kết quả LỖI (Đã bổ sung đầy đủ trường để không bị undefined)
         error_data = {
+            "filename": filename,
+            "question_index": q_num,       # <--- QUAN TRỌNG: Để hiển thị số câu
+            "question": question_text,     # <--- QUAN TRỌNG: Để hiển thị tên câu
             "score": 0, 
-            "comment": "AI Processing Error. Please try again.",
-            "transcript": str(e)
+            "comment": "AI Error. Please try again later.",
+            "transcript": f"System Error: {str(e)}"
         }
         json_path = UPLOAD_DIR / (os.path.splitext(filename)[0] + ".json")
         with open(json_path, "w", encoding="utf-8") as f:
@@ -135,9 +135,8 @@ async def examiner(): return (BASE_DIR / "static" / "examiner.html").read_text(e
 async def upload_video(
     background_tasks: BackgroundTasks, 
     file: UploadFile = File(...),
-    question_index: int = Form(...) # <--- NHẬN TRỰC TIẾP SỐ CÂU HỎI
+    question_index: int = Form(...) 
 ):
-    # Tạo tên file an toàn với timestamp
     timestamp = datetime.now(VN_TZ).strftime("%Y%m%d_%H%M%S")
     clean_name = "".join(c for c in file.filename if c.isalnum() or c in "._-")
     safe_filename = f"{timestamp}_Q{question_index}_{clean_name}"
@@ -147,10 +146,7 @@ async def upload_video(
     try:
         with dest.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-            
-        # Truyền cả filename và question_index vào hàm background
         background_tasks.add_task(process_video_background, safe_filename, question_index)
-        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -162,6 +158,8 @@ async def get_results(cname: str):
     
     results = []
     # Tìm tất cả file JSON có chứa tên user
+    # Logic: Tìm file JSON khớp tên, sau đó đọc nội dung
+    # Để tránh lỗi file rác, ta dùng try-except
     for f in UPLOAD_DIR.glob(f"*{cname}*.json"):
         try:
             with open(f, "r", encoding="utf-8") as jf:
@@ -186,7 +184,6 @@ async def get_results(cname: str):
 async def get_all_videos():
     if not UPLOAD_DIR.is_dir(): return []
     videos = []
-    # Sắp xếp file mới nhất lên đầu
     files = sorted(UPLOAD_DIR.iterdir(), key=lambda f: f.stat().st_mtime, reverse=True)
     
     for f in files:
