@@ -16,18 +16,11 @@
         .btn-blue { background-color: #3498db; }
         .btn-red { background-color: #e74c3c; }
         .btn-dark { background-color: #333; }
-        
-        /* 2 nút quan trọng */
-        .btn-next { background-color: #2ecc71; display: none; } 
-        .btn-orange { background-color: #f39c12; display: none; } /* Nút Re-record */
+        .btn-green { background-color: #2ecc71; display: none; } 
+        .btn-orange { background-color: #f39c12; display: none; }
+        .btn-purple { background-color: #9b59b6; display: none; } /* Nút Finish màu tím */
         
         button:disabled { background-color: #ccc; }
-        
-        /* Kết quả */
-        .result-card { background: #f8f9fa; border: 1px solid #ddd; padding: 15px; margin-bottom: 10px; text-align: left; border-radius: 8px; }
-        .score-badge { float: right; background: #2ecc71; color: white; padding: 5px 10px; border-radius: 15px; }
-        .loader { border: 5px solid #f3f3f3; border-top: 5px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
@@ -48,23 +41,20 @@
             <button id="startBtn" class="btn-red" onclick="startRecording()">🔴 Record</button>
             <button id="stopBtn" class="btn-dark" onclick="stopRecording()" disabled>⏹️ Stop & Submit</button>
             
-            <button id="nextBtn" class="btn-next" onclick="nextQuestion()">➡️ Next Question</button>
             <button id="reRecordBtn" class="btn-orange" onclick="reRecord()">🔄 Re-record</button>
+            
+            <button id="nextBtn" class="btn-green" onclick="nextQuestion()">➡️ Next Question</button>
+            
+            <button id="finishBtn" class="btn-purple" onclick="finishInterview()">✨ Finish Interview</button>
         </div>
         <p id="status">Ready...</p>
     </div>
 
-    <div id="screen-result" class="screen">
-        <h1>⏳ Grading in progress...</h1>
-        <div id="loading-spinner" class="loader"></div>
-        <p id="status-msg">AI is analyzing your answers. Please wait.</p>
-        
-        <div id="final-result" style="display:none;">
-            <h2 id="avg-score" style="font-size:3em; color:#2ecc71; margin:10px 0;">0.0</h2>
-            <p>Average Score</p>
-            <div id="details-list"></div>
-            <button class="btn-blue" onclick="location.reload()">Finish</button>
-        </div>
+    <div id="screen-finish" class="screen">
+        <h1 style="color: green; font-size: 3em;">🎉 Congratulations!</h1>
+        <h2>You have completed the interview.</h2>
+        <p>Your answers have been submitted. The AI is grading your performance.</p>
+        <button class="btn-blue" onclick="location.reload()">Back to Home</button>
     </div>
 
     <script>
@@ -77,7 +67,7 @@
         ];
         let curIdx = 0;
         let cName = "";
-        let mediaRecorder, chunks = [], stream, pollInterval;
+        let mediaRecorder, chunks = [], stream;
 
         async function startInterview() {
             const inp = document.getElementById('candidateName');
@@ -94,40 +84,33 @@
             document.getElementById('question-title').innerText = `Question ${idx+1}/${QUESTIONS.length}`;
             document.getElementById('question-content').innerText = QUESTIONS[idx];
             
-            // Reset nút về trạng thái ban đầu
-            toggleButtons(true, false, false, false); 
+            // Ẩn hết các nút điều hướng để reset trạng thái
+            document.getElementById('startBtn').style.display = 'inline-block';
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').style.display = 'inline-block';
+            document.getElementById('stopBtn').disabled = true;
+            document.getElementById('nextBtn').style.display = 'none';
+            document.getElementById('reRecordBtn').style.display = 'none';
+            document.getElementById('finishBtn').style.display = 'none';
+
             document.getElementById('status').innerText = "Ready...";
         }
 
-        // --- TÍNH NĂNG RE-RECORD ---
-        function reRecord() {
-            // Chỉ cần load lại câu hỏi hiện tại, cho phép quay đè lên file cũ
-            loadQ(curIdx);
-        }
+        function reRecord() { loadQ(curIdx); }
 
         function nextQuestion() {
             curIdx++;
-            if (curIdx < QUESTIONS.length) {
-                loadQ(curIdx);
-            } else {
-                stopCamera();
-                showWaitingScreen();
-            }
+            loadQ(curIdx);
         }
 
-        function toggleButtons(start, stop, next, rerecord) {
-            const bStart = document.getElementById('startBtn');
-            const bStop = document.getElementById('stopBtn');
-            const bNext = document.getElementById('nextBtn');
-            const bRe = document.getElementById('reRecordBtn');
-            
-            bStart.style.display = 'inline-block'; bStart.disabled = !start;
-            bStop.style.display = 'inline-block'; bStop.disabled = !stop;
-            bNext.style.display = next ? 'inline-block' : 'none';
-            bRe.style.display = rerecord ? 'inline-block' : 'none';
+        // Hàm chuyển sang màn hình chúc mừng
+        function finishInterview() {
+            stopCamera();
+            document.getElementById('screen-recorder').classList.remove('active');
+            document.getElementById('screen-finish').classList.add('active');
         }
 
-        // --- CAMERA ---
+        // --- CAMERA & UPLOAD ---
         async function setupCamera() {
             try {
                 stream = await navigator.mediaDevices.getUserMedia({video:true, audio:true});
@@ -138,11 +121,17 @@
 
         function startRecording() {
             chunks = [];
-            mediaRecorder = new MediaRecorder(stream, {mimeType:'video/webm'});
+            // Giảm bitrate để file nhẹ hơn, upload nhanh hơn
+            const options = { mimeType: 'video/webm;codecs=vp8,opus', videoBitsPerSecond: 250000 };
+            try { mediaRecorder = new MediaRecorder(stream, options); } 
+            catch { mediaRecorder = new MediaRecorder(stream); }
+
             mediaRecorder.ondataavailable = e => { if(e.data.size>0) chunks.push(e.data); };
             mediaRecorder.onstop = uploadVideo;
             mediaRecorder.start();
-            toggleButtons(false, true, false, false);
+            
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
             document.getElementById('status').innerText = "🔴 Recording...";
         }
         function stopRecording() {
@@ -153,7 +142,6 @@
 
         async function uploadVideo() {
             const blob = new Blob(chunks, {type:'video/webm'});
-            // Tên file giữ nguyên logic (không timestamp) để hỗ trợ Re-record ghi đè
             const fname = `${cName}_Question_${curIdx+1}.webm`;
             const fd = new FormData();
             fd.append('file', blob, fname);
@@ -161,50 +149,22 @@
             try {
                 const res = await fetch('/api/upload', {method:'POST', body:fd});
                 if(res.ok) {
-                    document.getElementById('status').innerText = "✅ Uploaded! AI is grading...";
-                    // HIỆN NÚT NEXT VÀ RE-RECORD
-                    toggleButtons(false, false, true, true);
+                    document.getElementById('status').innerText = "✅ Submitted! AI is grading...";
+                    
+                    document.getElementById('startBtn').style.display = 'none';
+                    document.getElementById('stopBtn').style.display = 'none';
+                    document.getElementById('reRecordBtn').style.display = 'inline-block';
+
+                    // LOGIC QUAN TRỌNG: Kiểm tra xem đã đến câu cuối chưa
+                    if (curIdx === QUESTIONS.length - 1) {
+                        // Nếu là câu 5: Hiện nút Finish
+                        document.getElementById('finishBtn').style.display = 'inline-block';
+                    } else {
+                        // Nếu chưa phải câu 5: Hiện nút Next
+                        document.getElementById('nextBtn').style.display = 'inline-block';
+                    }
                 }
             } catch { alert("Upload Failed"); }
-        }
-
-        // --- WAITING & RESULTS ---
-        function showWaitingScreen() {
-            document.getElementById('screen-recorder').classList.remove('active');
-            document.getElementById('screen-result').classList.add('active');
-            pollInterval = setInterval(checkResults, 3000); // Hỏi server mỗi 3s
-        }
-
-        async function checkResults() {
-            try {
-                const res = await fetch(`/api/results/${cName}`);
-                const data = await res.json();
-                
-                // Nếu đã chấm xong (đủ 5 câu)
-                if (data.completed) {
-                    clearInterval(pollInterval);
-                    
-                    document.getElementById('loading-spinner').style.display = 'none';
-                    document.getElementById('status-msg').style.display = 'none';
-                    document.getElementById('final-result').style.display = 'block';
-                    
-                    document.getElementById('avg-score').innerText = data.avg_score;
-                    const list = document.getElementById('details-list');
-                    list.innerHTML = "";
-                    
-                    data.details.forEach(item => {
-                        list.innerHTML += `
-                            <div class="result-card">
-                                <span class="score-badge">${item.score}/10</span>
-                                <strong>${item.question}</strong><br>
-                                <small style="color:#555">"${item.comment}"</small>
-                            </div>
-                        `;
-                    });
-                } else {
-                    document.getElementById('status-msg').innerText = `AI is grading... Processed: ${data.count}/5`;
-                }
-            } catch (e) { console.error(e); }
         }
     </script>
 </body>
