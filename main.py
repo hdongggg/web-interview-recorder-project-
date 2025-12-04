@@ -253,7 +253,6 @@ async def get_all_videos():
                         grading_status = "done"
                         score = data.get('score', 0)
                         comment = data.get('comment', '')
-                        # [DÒNG NÀY QUAN TRỌNG VỪA THÊM VÀO]
                         transcript = data.get('transcript', '(No transcript available)')
                 except: pass
 
