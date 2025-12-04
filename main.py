@@ -71,7 +71,7 @@ def process_video_background(filename: str):
             return
 
         # 1.3 Gọi Gemini lấy Transcript (Chỉ lấy chữ)
-        model = genai.GenerativeModel(model_name="gemini-2.0-flash")
+        model = genai.GenerativeModel(model_name="gemini-2.5-flash")
         
         print(f"🎤 [Step 1] Transcribing...")
         stt_response = model.generate_content(
@@ -93,6 +93,7 @@ def process_video_background(filename: str):
         
         prompt_grading = f"""
         Act as a Professional Recruiter.
+        
         
         Question: "{question_text}"
         Candidate's Answer (Text): "{transcript_text}"
