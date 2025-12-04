@@ -13,8 +13,12 @@ import google.generativeai as genai
 app = FastAPI(title="AI Interviewer")
 
 # --- CẤU HÌNH ---
-GOOGLE_API_KEY = "AIzaSyBf1Ml3WzWX1XRNc8lNALRqWnBb3Hy2Fvo" # <--- THAY KEY CỦA BẠN VÀO ĐÂY
-genai.configure(api_key=GOOGLE_API_KEY)
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY") 
+
+if not GOOGLE_API_KEY:
+    print("❌ Lỗi: Chưa cấu hình GOOGLE_API_KEY trong Railway Variables!")
+else:
+    genai.configure(api_key=GOOGLE_API_KEY)
 
 app.add_middleware(
     CORSMiddleware,
