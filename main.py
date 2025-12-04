@@ -7,32 +7,25 @@ import shutil
 import os
 import time
 import json
+import subprocess  # Thư viện để gọi lệnh FFmpeg
 import re
 from datetime import datetime, timedelta, timezone
 import google.generativeai as genai
 
-app = FastAPI(title="AI Interviewer Pro")
+app = FastAPI(title="AI Interviewer - Audio Split")
 
-# --- 1. CẤU HÌNH API KEY ---
-# (Lưu ý: Đảm bảo Key này còn hạn mức sử dụng)
+# --- CẤU HÌNH ---
+# Nên đặt API Key trong Variable của Railway để bảo mật, nhưng để cứng vầy test cho nhanh
 GOOGLE_API_KEY = "AIzaSyD7d78Goxctsn7OohpVKp-ggUT3jgC9tZs" 
 genai.configure(api_key=GOOGLE_API_KEY)
 
-# In phiên bản thư viện ra Log để kiểm tra (Xem trong Railway Logs)
-print(f"📚 Google GenAI Library Version: {genai.__version__}")
-
-# Múi giờ VN
 VN_TZ = timezone(timedelta(hours=7))
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-UPLOAD_DIR = Path("/mnt/videos") 
+UPLOAD_DIR = Path("/mnt/videos")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+# Thư mục tạm để chứa file mp3 sau khi tách
+AUDIO_DIR = Path("/mnt/audios")
+AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
 BASE_DIR = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
@@ -46,105 +39,127 @@ QUESTIONS_DB = {
     5: "What are your salary expectations?"
 }
 
-# --- 2. HÀM XỬ LÝ BACKGROUND (CƠ CHẾ AUTO-FIX) ---
-def process_video_background(filename: str, q_num: int):
-    print(f"🚀 [Start AI] Analyzing {filename} (Question {q_num})")
-    file_path = UPLOAD_DIR / filename
-    question_text = QUESTIONS_DB.get(q_num, "General Interview Question")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --- HÀM TÁCH AUDIO (FFMPEG) ---
+def extract_audio(video_path: Path) -> Path:
+    """Chuyển đổi Video (.webm) -> Audio (.mp3) để xử lý nhanh hơn"""
+    filename = video_path.stem
+    audio_path = AUDIO_DIR / f"{filename}.mp3"
+    
+    # Lệnh chạy FFmpeg: Lấy input -> Bỏ hình (-vn) -> Codec mp3 -> Output
+    command = [
+        "ffmpeg", "-y", "-i", str(video_path), 
+        "-vn", "-acodec", "libmp3lame", "-q:a", "4", 
+        str(audio_path)
+    ]
+    
+    try:
+        # Gọi lệnh hệ thống
+        subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return audio_path
+    except Exception as e:
+        print(f"⚠️ FFmpeg Error: {e}. Fallback to video file.")
+        return video_path # Nếu lỗi thì trả về video gốc để dùng tạm
+
+# --- PIPELINE XỬ LÝ BACKGROUND ---
+def process_interview_pipeline(filename: str, q_num: int):
+    print(f"🚀 [Start Pipeline] {filename} (Question {q_num})")
+    
+    video_path = UPLOAD_DIR / filename
+    json_path = UPLOAD_DIR / (os.path.splitext(filename)[0] + ".json")
+    question_text = QUESTIONS_DB.get(q_num, "General Question")
 
     try:
-        # A. Upload video
-        print("⏳ Uploading to Google...")
-        video_file = genai.upload_file(path=file_path, display_name=filename)
+        # BƯỚC 1: TÁCH ÂM THANH
+        print("🔊 Extracting Audio...")
+        media_path = extract_audio(video_path)
         
-        # B. Đợi xử lý
-        while video_file.state.name == "PROCESSING":
-            time.sleep(2)
-            video_file = genai.get_file(video_file.name)
+        # BƯỚC 2: TRANSCRIBE (Speech-to-Text)
+        print(f"☁️ Uploading {media_path.name} to Gemini...")
+        # Upload file audio (nhẹ hơn video rất nhiều)
+        uploaded_file = genai.upload_file(path=media_path)
         
-        if video_file.state.name == "FAILED":
-            raise ValueError("Google Video Processing Failed.")
+        # Đợi xử lý
+        while uploaded_file.state.name == "PROCESSING":
+            time.sleep(1)
+            uploaded_file = genai.get_file(uploaded_file.name)
+            
+        if uploaded_file.state.name == "FAILED":
+            raise ValueError("File processing failed on Google Cloud.")
 
-        # C. CƠ CHẾ THỬ NHIỀU MODEL (Để tránh lỗi 404)
-        # Hệ thống sẽ thử lần lượt các tên model này
-        backup_models = ["gemini-1.5-flash", "gemini-1.5-flash-001", "gemini-1.5-flash-latest", "gemini-pro"]
+        # Gọi Model để lấy Text (Dùng Flash cho nhanh)
+        print("📝 Transcribing...")
+        model = genai.GenerativeModel("gemini-1.5-flash")
         
-        response = None
-        used_model = ""
-        last_error = None
+        transcribe_res = model.generate_content(
+            [uploaded_file, "Listen carefully and transcribe this audio to English text verbatim. No intro/outro."],
+        )
+        transcript_text = transcribe_res.text.strip()
+        print(f"✅ Transcript extracted: {len(transcript_text)} chars")
+        
+        # Dọn dẹp file trên Cloud
+        genai.delete_file(uploaded_file.name)
+        # Xóa file mp3 tạm trên server
+        if media_path != video_path:
+            media_path.unlink(missing_ok=True)
 
-        prompt = f"""
-        You are an expert HR Recruiter.
-        The candidate is answering Question {q_num}: "{question_text}"
+        # BƯỚC 3: CHẤM ĐIỂM (GRADING) - Dựa trên Text
+        print("🧠 Grading...")
+        grading_prompt = f"""
+        You are a Recruiter.
+        Question: "{question_text}"
+        Candidate Answer: "{transcript_text}"
         
         Task:
-        1. Transcribe the answer verbatim (English).
-        2. Score the answer (1-10).
-        3. Give a short comment (max 30 words).
+        1. Score (1-10).
+        2. Short comment (max 30 words).
         
-        Output strictly in JSON format:
-        {{ "transcript": "...", "score": 0, "comment": "..." }}
+        Output JSON: {{ "score": 0, "comment": "..." }}
         """
-
-        for model_name in backup_models:
-            try:
-                print(f"🔄 Trying model: {model_name}...")
-                model = genai.GenerativeModel(model_name=model_name)
-                response = model.generate_content(
-                    [video_file, prompt],
-                    generation_config={"response_mime_type": "application/json"}
-                )
-                used_model = model_name
-                print(f"✅ Success with model: {model_name}")
-                break # Nếu thành công thì thoát vòng lặp ngay
-            except Exception as e:
-                print(f"⚠️ Failed with {model_name}: {e}")
-                last_error = e
         
-        # Nếu thử hết model mà vẫn không có response
-        if not response:
-            try: genai.delete_file(video_file.name)
-            except: pass
-            raise last_error
+        grading_res = model.generate_content(
+            grading_prompt,
+            generation_config={"response_mime_type": "application/json"}
+        )
+        
+        data = json.loads(grading_res.text)
 
-        # D. Xử lý kết quả
-        try: genai.delete_file(video_file.name)
-        except: pass
-
-        data = json.loads(response.text)
-
+        # BƯỚC 4: LƯU KẾT QUẢ
         result_data = {
             "filename": filename,
             "question_index": q_num,
             "question": question_text,
-            "transcript": data.get("transcript", "No transcript."),
+            "transcript": transcript_text,
             "score": data.get("score", 0),
             "comment": data.get("comment", "No comment."),
-            "ai_model_used": used_model, # Ghi lại model nào đã chạy được
             "timestamp": datetime.now(VN_TZ).strftime("%Y-%m-%d %H:%M:%S")
         }
         
-        json_path = UPLOAD_DIR / (os.path.splitext(filename)[0] + ".json")
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(result_data, f, ensure_ascii=False, indent=2)
             
-        print(f"🎉 Grading Complete! Score: {result_data['score']}")
+        print(f"🎉 Done! Score: {result_data['score']}")
 
     except Exception as e:
-        print(f"❌ [CRITICAL ERROR] {filename}: {e}")
+        print(f"❌ Pipeline Error: {e}")
         error_data = {
             "filename": filename,
             "question_index": q_num,
             "question": question_text,
-            "score": 0, 
-            "comment": "AI Connection Error. Please Check Logs.",
-            "transcript": f"Error details: {str(e)}"
+            "score": 0,
+            "comment": "System Error.",
+            "transcript": f"Error log: {str(e)}"
         }
-        json_path = UPLOAD_DIR / (os.path.splitext(filename)[0] + ".json")
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(error_data, f)
 
-# --- 3. API ROUTES (Giữ nguyên) ---
+# --- API ROUTES ---
 
 @app.get("/", response_class=HTMLResponse)
 async def home(): return (BASE_DIR / "static" / "index.html").read_text(encoding="utf-8")
@@ -166,7 +181,8 @@ async def upload_video(
     try:
         with dest.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        background_tasks.add_task(process_video_background, safe_filename, question_index)
+        # Gọi Pipeline mới
+        background_tasks.add_task(process_interview_pipeline, safe_filename, question_index)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -194,18 +210,21 @@ async def get_all_videos():
     for f in files:
         if f.is_file() and f.suffix.lower() in ['.webm', '.mp4']:
             json_path = f.with_suffix('.json')
-            status, score, comment = "pending", 0, "Waiting..."
+            status, score, comment, trans = "pending", 0, "Processing...", ""
             if json_path.exists():
                 try:
                     with open(json_path, encoding='utf-8') as jf:
                         data = json.load(jf)
-                        status, score, comment = "done", data.get('score', 0), data.get('comment', '')
+                        status = "done"
+                        score = data.get('score', 0)
+                        comment = data.get('comment', '')
+                        trans = data.get('transcript', '')[:50] + "..."
                 except: pass
             videos.append({
                 "name": f.name,
                 "url": f"/uploads/{f.name}",
                 "created": datetime.fromtimestamp(f.stat().st_mtime, tz=VN_TZ).strftime("%d/%m %H:%M"),
-                "grading_status": status, "score": score, "comment": comment
+                "grading_status": status, "score": score, "comment": comment, "transcript": trans
             })
     return videos
 
