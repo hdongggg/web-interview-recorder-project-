@@ -62,7 +62,7 @@ def process_video_background(filename: str, duration: float):
             "question": question_text,
             "transcript": "(No speech detected - Video < 5s)",
             "score": 0,
-            "comment": "Câu trả lời quá ngắn (dưới 5 giây). Vui lòng trả lời đầy đủ hơn."
+            "comment": "Your answer is too short (less than 5 seconds). Please answer with better performance."
         }
         # Lưu file JSON ngay lập tức
         json_path = UPLOAD_DIR / (os.path.splitext(filename)[0] + ".json")
