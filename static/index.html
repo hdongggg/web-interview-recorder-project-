@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Interview System</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; text-align: center; padding: 20px; background-color: #f0f2f5; }
+        .screen { display: none; max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .active { display: block; }
+        
+        /* Loading Spinner */
+        .loader { border: 5px solid #f3f3f3; border-top: 5px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        /* Result Display */
+        .result-card { background: #f8f9fa; border: 1px solid #ddd; padding: 15px; margin-bottom: 10px; text-align: left; border-radius: 8px; }
+        .score-badge { float: right; background: #2ecc71; color: white; padding: 5px 10px; border-radius: 15px; font-weight: bold; }
+        .comment-text { font-style: italic; color: #666; font-size: 0.9em; }
+        
+        /* General Styles */
+        #video-container { margin: 20px auto; border: 4px solid #3498db; border-radius: 8px; overflow: hidden; background: black; max-width: 640px;}
+        video { width: 100%; display: block; transform: scaleX(-1); }
+        button { padding: 12px 24px; margin: 10px; cursor: pointer; border: none; border-radius: 5px; font-weight: bold; color: white; transition: 0.3s; }
+        .btn-blue { background-color: #3498db; }
+        .btn-red { background-color: #e74c3c; }
+        .btn-dark { background-color: #333; }
+        .btn-green { background-color: #2ecc71; display: none; } 
+        .btn-orange { background-color: #f39c12; display: none; }
+        .btn-purple { background-color: #9b59b6; display: none; } 
+        
+        button:disabled { background-color: #ccc; }
+    </style>
+</head>
+<body>
+
+    <div id="screen-login" class="screen active">
+        <h1>👋 AI Interview Login</h1>
+        <input type="text" id="candidateName" placeholder="Enter full name" style="padding:10px; width:70%;">
+        <br><button class="btn-blue" onclick="startInterview()">Start Interview</button>
+    </div>
+
+    <div id="screen-recorder" class="screen">
+        <h3 id="question-title">Question 1</h3>
+        <p id="question-content" style="font-size: 1.2em; font-weight: 500;">...</p>
+        
+        <div id="video-container"><video id="videoPlayer" autoplay muted></video></div>
+        
+        <div class="controls">
+            <button id="startBtn" class="btn-red" onclick="startRecording()">🔴 Record</button>
+            <button id="stopBtn" class="btn-dark" onclick="stopRecording()" disabled>⏹️ Stop & Submit</button>
+            
+            <button id="reRecordBtn" class="btn-orange" onclick="reRecord()">🔄 Re-record</button>
+            <button id="nextBtn" class="btn-green" onclick="nextQuestion()">➡️ Next Question</button>
+            <button id="finishBtn" class="btn-purple" onclick="finishInterview()">✨ Finish Interview</button>
+        </div>
+        <p id="status">Ready...</p>
+    </div>
+
+    <div id="screen-result" class="screen">
+        <h1 id="result-title" style="color: #3498db;">⏳ Analyzing your answers...</h1>
+        <p id="status-msg">
+            Your submissions are being processed by the AI. Please wait.<br>Processed: <span id="processed-count">0</span>/5
+        </p>
+        
+        <div id="loading-spinner" class="loader"></div>
+        
+        <div id="final-score-area" style="display:none; margin-top: 30px;">
+            <h2 style="color: #2ecc71; font-size: 3em; margin: 10px 0;" id="avg-score">0.0</h2>
+            <p>Average Score</p>
+            
+            <div id="details-list" style="margin-top: 20px;"></div>
+            
+            <button class="btn-blue" onclick="location.reload()">Back to Home</button>
+        </div>
+    </div>
+
+    <script>
+        const QUESTIONS = [
+            "Please briefly introduce yourself.",
+            "What are your greatest strengths and weaknesses?",
+            "Why do you want to apply for this position?",
+            "Describe a challenge you faced at work and how you overcame it?",
+            "What are your salary expectations?"
+        ];
+        let curIdx = 0;
+        let cName = "";
+        let mediaRecorder, chunks = [], stream, pollInterval;
+
+        // --- UI LOGIC ---
+        async function startInterview() {
+            const inp = document.getElementById('candidateName');
+            if(!inp.value.trim()) return alert("Enter name!");
+            cName = inp.value.trim().replace(/[^a-zA-Z0-9]/g, '_');
+            
+            document.getElementById('screen-login').classList.remove('active');
+            document.getElementById('screen-recorder').classList.add('active');
+            await setupCamera();
+            loadQ(0);
+        }
+
+        function loadQ(idx) {
+            document.getElementById('question-title').innerText = `Question ${idx+1}/${QUESTIONS.length}`;
+            document.getElementById('question-content').innerText = QUESTIONS[idx];
+            
+            document.getElementById('startBtn').style.display = 'inline-block';
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').style.display = 'inline-block';
+            document.getElementById('stopBtn').disabled = true;
+            document.getElementById('nextBtn').style.display = 'none';
+            document.getElementById('reRecordBtn').style.display = 'none';
+            document.getElementById('finishBtn').style.display = 'none';
+
+            document.getElementById('status').innerText = "Ready...";
+        }
+
+        function reRecord() { loadQ(curIdx); }
+
+        function nextQuestion() {
+            curIdx++;
+            loadQ(curIdx);
+        }
+
+        // HÀM QUAN TRỌNG: Kết thúc phỏng vấn và chuyển sang màn hình chờ kết quả
+        function finishInterview() {
+            stopCamera();
+            // 1. Chuyển sang màn hình chờ
+            document.getElementById('screen-recorder').classList.remove('active');
+            document.getElementById('screen-result').classList.add('active');
+            
+            // 2. Kích hoạt Polling
+            pollInterval = setInterval(checkResults, 3000); 
+        }
+        
+        // --- POLLING LOGIC ---
+        async function checkResults() {
+            try {
+                const res = await fetch(`/api/results/${cName}`);
+                const data = await res.json();
+                
+                document.getElementById('processed-count').innerText = data.count;
+
+                if (data.completed) {
+                    clearInterval(pollInterval); // Dừng hỏi
+                    renderFinalResults(data);
+                }
+            } catch (e) { console.error("Polling Error:", e); }
+        }
+
+        function renderFinalResults(data) {
+            // Ẩn Loading
+            document.getElementById('loading-spinner').style.display = 'none';
+            document.getElementById('status-msg').style.display = 'none';
+            document.getElementById('result-title').innerText = "🎉 Evaluation Complete!";
+            
+            // Hiện Kết quả
+            document.getElementById('final-score-area').style.display = 'block';
+            document.getElementById('avg-score').innerText = data.avg_score;
+            
+            const list = document.getElementById('details-list');
+            list.innerHTML = "";
+            
+            // Hiển thị chi tiết từng câu trả lời và nhận xét của AI
+            data.details.forEach((item, index) => {
+                list.innerHTML += `
+                    <div class="result-card">
+                        <span class="score-badge">${item.score}/10</span>
+                        <strong>Question ${index + 1}: ${item.question}</strong><br>
+                        <p class="comment-text">${item.comment}</p>
+                    </div>
+                `;
+            });
+        }
+
+
+        // --- CAMERA & UPLOAD ---
+        async function setupCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({video:true, audio:true});
+                document.getElementById('videoPlayer').srcObject = stream;
+            } catch { alert("Camera Error"); }
+        }
+        function stopCamera() { if(stream) stream.getTracks().forEach(t=>t.stop()); }
+
+        function startRecording() {
+            chunks = [];
+            const options = { mimeType: 'video/webm;codecs=vp8,opus', videoBitsPerSecond: 250000 };
+            try { mediaRecorder = new MediaRecorder(stream, options); } 
+            catch { mediaRecorder = new MediaRecorder(stream); }
+            mediaRecorder.ondataavailable = e => { if(e.data.size>0) chunks.push(e.data); };
+            mediaRecorder.onstop = uploadVideo;
+            mediaRecorder.start();
+            
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
+            document.getElementById('status').innerText = "🔴 Recording...";
+        }
+        function stopRecording() {
+            mediaRecorder.stop();
+            document.getElementById('stopBtn').disabled = true;
+            document.getElementById('status').innerText = "⏳ Uploading...";
+        }
+
+        async function uploadVideo() {
+            const blob = new Blob(chunks, {type:'video/webm'});
+            const fname = `${cName}_Question_${curIdx+1}.webm`;
+            const fd = new FormData();
+            fd.append('file', blob, fname);
+
+            try {
+                const res = await fetch('/api/upload', {method:'POST', body:fd});
+                if(res.ok) {
+                    document.getElementById('status').innerText = "✅ Submitted! AI is grading...";
+                    
+                    document.getElementById('startBtn').style.display = 'none';
+                    document.getElementById('stopBtn').style.display = 'none';
+                    document.getElementById('reRecordBtn').style.display = 'inline-block';
+
+                    // LOGIC CHUYỂN NÚT
+                    if (curIdx === QUESTIONS.length - 1) {
+                        document.getElementById('finishBtn').style.display = 'inline-block';
+                    } else {
+                        document.getElementById('nextBtn').style.display = 'inline-block';
+                    }
+                }
+            } catch { alert("Upload Failed"); }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Examiner Portal</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background-color: #f8f9fa; }
+        h1 { text-align: center; color: #333; }
+        table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
+        th, td { border-bottom: 1px solid #ddd; padding: 15px; text-align: left; vertical-align: middle; }
+        th { background-color: #007bff; color: white; }
+        
+        .badge-pending { background: #f1c40f; color: black; padding: 5px 10px; border-radius: 15px; font-weight: bold; font-size: 0.85em; }
+        .badge-score { background: #2ecc71; color: white; padding: 5px 10px; border-radius: 15px; font-weight: bold; font-size: 1.1em; }
+        
+        .btn { padding: 6px 12px; margin: 2px; border-radius: 4px; border: none; cursor: pointer; color: white; font-weight: bold; font-size: 13px; text-decoration: none; display: inline-block; }
+        .btn-watch { background: #17a2b8; }
+        .btn-del { background: #dc3545; }
+    </style>
+</head>
+<body>
+
+    <h1>📋 Interview Progress & AI Scoring</h1>
+    <div style="text-align: right; margin-bottom: 10px;">
+        <button class="btn btn-del" onclick="nuke()">🗑️ Clear All Data</button>
+        <button class="btn btn-watch" onclick="loadVideos()">🔄 Refresh List</button>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 25%">Candidate / File</th>
+                <th style="width: 15%">Time</th>
+                <th style="width: 20%">AI Score</th> <th style="width: 25%">AI Comment</th>
+                <th style="width: 15%">Actions</th>
+            </tr>
+        </thead>
+        <tbody id="list"></tbody>
+    </table>
+
+    <div id="preview" style="text-align:center; margin-top:20px;"></div>
+
+    <script>
+        async function loadVideos() {
+            const res = await fetch('/api/videos');
+            const videos = await res.json();
+            const el = document.getElementById('list');
+            el.innerHTML = '';
+
+            if (videos.length === 0) el.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px">No videos.</td></tr>';
+
+            videos.forEach(v => {
+                // Xử lý hiển thị cột điểm
+                let scoreDisplay = `<span class="badge-pending">⏳ Grading...</span>`;
+                if (v.grading_status === 'done') {
+                    scoreDisplay = `<span class="badge-score">${v.score}/10</span>`;
+                }
+
+                el.innerHTML += `
+                    <tr>
+                        <td><strong>${v.name}</strong></td>
+                        <td>${v.created}</td>
+                        <td>${scoreDisplay}</td>
+                        <td><small style="color:#555">${v.comment || 'Processing...'}</small></td>
+                        <td>
+                            <a href="#" class="btn btn-watch" onclick="play('${v.url}'); return false;">👁️ Watch</a>
+                            <button class="btn btn-del" onclick="del('${v.name}')">🗑️</button>
+                        </td>
+                    </tr>
+                `;
+            });
+        }
+
+        async function del(name) {
+            if(confirm('Delete?')) { await fetch(`/api/video/${name}`, {method:'DELETE'}); loadVideos(); }
+        }
+        async function nuke() {
+            if(confirm('Delete ALL?')) { await fetch('/api/nuke-all-videos', {method:'DELETE'}); loadVideos(); }
+        }
+        function play(url) {
+            document.getElementById('preview').innerHTML = `
+                <div style="background:black; padding:10px; display:inline-block; border-radius:8px;">
+                    <video controls autoplay src="${url}" style="max-height:300px"></video><br>
+                    <button class="btn btn-del" onclick="this.parentElement.remove()">Close</button>
+                </div>`;
+        }
+
+        loadVideos();
+        // Tự động refresh mỗi 5 giây để cập nhật điểm số mới
+        setInterval(loadVideos, 5000);
+    </script>
+</body>
+</html>
