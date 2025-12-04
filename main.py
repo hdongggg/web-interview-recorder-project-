@@ -110,7 +110,7 @@ def process_video_background(filename: str):
         # Gửi Text đi chấm (Rất nhanh)
         grading_response = model.generate_content(
             prompt_grading,
-            generation_config={"response_mime_type": "application/json"}
+            generation_config={"response_mime_type": "application/json"},
             request_options={"timeout": 180} # <-- THÊM DÒNG NÀY VÀO
         )
 
