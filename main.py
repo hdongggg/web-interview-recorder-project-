@@ -244,3 +244,63 @@ async def delete_video(filename: str):
     (UPLOAD_DIR / filename).unlink(missing_ok=True)
     (UPLOAD_DIR / (os.path.splitext(filename)[0] + ".json")).unlink(missing_ok=True)
     return {"ok": True}
+
+# --- API: TẠO BÁO CÁO TỔNG HỢP (ĐÃ CĂN CHỈNH LỀ) ---
+@app.get("/api/report/{cname}")
+async def generate_report(cname: str):
+    
+    if not UPLOAD_DIR.is_dir(): 
+        raise HTTPException(status_code=500, detail="Server storage not available.")
+    
+    # 1. Tìm dữ liệu JSON
+    results = []
+    for f in UPLOAD_DIR.glob(f"{cname}_Question_*.json"):
+        try:
+            with open(f, "r", encoding="utf-8") as jf:
+                results.append(json.load(jf))
+        except: continue
+    
+    if len(results) < 5:
+        raise HTTPException(status_code=400, detail=f"Chưa đủ {5} câu trả lời để tạo báo cáo.")
+
+    # 2. Sắp xếp và Tính điểm
+    results.sort(key=lambda x: x['filename']) 
+    avg_score = round(sum(r['score'] for r in results) / len(results), 1)
+    
+    # 3. Tạo nội dung báo cáo (Text File)
+    # Ghi chú: Căn lề sát trái để file xuất ra không bị thụt đầu dòng
+    report_content = f"""
+=============================================================
+              INTERVIEW RESULTS SUMMARY (REPORT CARD)
+=============================================================
+CANDIDATE NAME   : {cname.replace('_', ' ')}
+DATE GENERATED   : {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}
+OVERALL AVG SCORE: {avg_score} / 10
+=============================================================
+
+DETAILS BY QUESTION:
+"""
+    
+    for i, item in enumerate(results):
+        report_content += f"""
+-------------------------------------------------------------
+QUESTION {i+1}: {item.get('question', 'Unknown Question')}
+SCORE   : {item.get('score', 0)}/10
+COMMENT : {item.get('comment', 'No comment provided by AI.')}
+TRANSCRIPT:
+{item.get('transcript', 'Unavailable.')}
+"""
+
+    report_content += "\n=============================================================\n"
+
+    # 4. Lưu file Report
+    report_filename = f"REPORT_{cname}.txt"
+    report_path = UPLOAD_DIR / report_filename
+    
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write(report_content)
+
+    return {
+        "ok": True, 
+        "url": f"/uploads/{report_filename}"
+    }
