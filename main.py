@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks
+from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Form
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,14 +7,18 @@ import shutil
 import os
 import time
 import json
-from datetime import datetime, timedelta
+import subprocess  # Dùng để gọi FFmpeg
+from datetime import datetime, timedelta, timezone
 import google.generativeai as genai
 
-app = FastAPI(title="AI Interviewer")
+app = FastAPI(title="AI Interviewer Flash 2.0")
 
-# --- CẤU HÌNH API KEY (QUAN TRỌNG) ---
-GOOGLE_API_KEY = "AIzaSyD7d78Goxctsn7OohpVKp-ggUT3jgC9tZs" # <--- DÁN KEY CỦA BẠN VÀO ĐÂY
+# --- CẤU HÌNH API KEY ---
+GOOGLE_API_KEY = "AIzaSyD7d78Goxctsn7OohpVKp-ggUT3jgC9tZs" 
 genai.configure(api_key=GOOGLE_API_KEY)
+
+# Múi giờ VN
+VN_TZ = timezone(timedelta(hours=7))
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,84 +42,119 @@ QUESTIONS_DB = {
     5: "What are your salary expectations?"
 }
 
-# --- HÀM XỬ LÝ BACKGROUND TỐI ƯU (1 BƯỚC) ---
-def process_video_background(filename: str):
-    print(f"🚀 [Start] AI Grading: {filename}")
-    file_path = UPLOAD_DIR / filename
+# --- HÀM TÁCH AUDIO TỪ VIDEO (Sử dụng FFmpeg) ---
+def extract_audio(video_path: Path) -> Path:
+    """Tách audio từ webm/mp4 ra file mp3 để xử lý nhẹ hơn"""
+    audio_filename = video_path.stem + ".mp3"
+    audio_path = video_path.parent / audio_filename
     
-    # 1. Xác định câu hỏi
-    try:
-        parts = filename.split("_Question_")
-        q_num = int(parts[1].split(".")[0])
-        question_text = QUESTIONS_DB.get(q_num, "General Question")
-    except:
-        question_text = "General Question"
+    # Lệnh FFmpeg: -i input -vn (bỏ hình) -acodec libmp3lame (nén mp3) -y (ghi đè)
+    command = [
+        "ffmpeg", "-i", str(video_path),
+        "-vn", "-acodec", "libmp3lame", "-q:a", "4",
+        "-y", str(audio_path)
+    ]
+    
+    # Chạy lệnh (ẩn log để đỡ rác console)
+    subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return audio_path
+
+# --- HÀM XỬ LÝ BACKGROUND (Video -> Audio -> Gemini) ---
+def process_video_background(filename: str, q_num: int):
+    print(f"🚀 [Step 1] Start Processing: {filename}")
+    video_path = UPLOAD_DIR / filename
+    json_path = UPLOAD_DIR / (os.path.splitext(filename)[0] + ".json")
+    question_text = QUESTIONS_DB.get(q_num, "General Question")
+
+    audio_path = None
+    uploaded_file = None
 
     try:
-        # 2. Upload lên Google
-        video_file = genai.upload_file(path=file_path, display_name=filename)
+        # --- BƯỚC 2: TÁCH AUDIO ---
+        print(f"🎵 [Step 2] Extracting Audio...")
+        if not video_path.exists():
+            raise FileNotFoundError("Video file not found")
+            
+        audio_path = extract_audio(video_path)
+        print(f"✅ Audio extracted: {audio_path.name}")
+
+        # --- BƯỚC 3: UPLOAD AUDIO LÊN GOOGLE ---
+        # Audio upload nhanh hơn video gấp nhiều lần
+        print(f"☁️ [Step 3] Uploading Audio to Google...")
+        uploaded_file = genai.upload_file(path=audio_path, display_name=audio_path.name)
         
-        # Đợi Google xử lý video (Bắt buộc)
-        while video_file.state.name == "PROCESSING":
+        # Đợi xử lý (Audio xử lý cực nhanh, thường < 2s)
+        while uploaded_file.state.name == "PROCESSING":
             time.sleep(1)
-            video_file = genai.get_file(video_file.name)
-        
-        if video_file.state.name == "FAILED": 
-            print(f"❌ [Fail] Google cannot process {filename}")
-            return
+            uploaded_file = genai.get_file(uploaded_file.name)
 
-        # 3. GỌI GEMINI 1 LẦN DUY NHẤT (Vừa lấy Text, Vừa Chấm) -> NHANH HƠN
-        model = genai.GenerativeModel(model_name="gemini-2.0-flash")
+        if uploaded_file.state.name == "FAILED":
+            raise ValueError("Google failed to process audio file.")
+
+        # --- BƯỚC 4: TRANSCRIBE & CHẤM ĐIỂM (Dùng Gemini 2.0 Flash) ---
+        print(f"🧠 [Step 4] Calling Gemini 2.0 Flash...")
         
+        # Sử dụng model mới nhất: gemini-2.0-flash-exp (nếu có) hoặc gemini-1.5-flash
+        # Hiện tại bản ổn định nhất vẫn là 1.5-flash, nhưng nếu bạn muốn test 2.0 thì dùng tên dưới:
+        model_name = "gemini-1.5-flash" # Hoặc "gemini-2.0-flash-exp"
+        
+        model = genai.GenerativeModel(
+            model_name=model_name,
+            generation_config={"response_mime_type": "application/json"}
+        )
+
         prompt = f"""
-        Act as a Professional Recruiter.
-        The candidate is answering: "{question_text}"
+        You are an expert HR Recruiter.
+        The candidate is answering Question {q_num}: "{question_text}"
+        
+        Input: An audio recording of the answer.
         
         Task:
-        1. Transcribe the answer verbatim.
-        2. Score it (1-10), give comments.
+        1. LISTEN to the audio and TRANSCRIPT it verbatim (English).
+        2. Based on the TRANSCRIPT, SCORE the answer (1-10).
+        3. Provide a short COMMENT (max 30 words).
         
-        Return JSON structure:
+        Output JSON:
         {{
             "transcript": "...",
             "score": 0,
-            "comment": "Short feedback (max 20 words)"
+            "comment": "..."
         }}
         """
 
+        response = model.generate_content([uploaded_file, prompt])
         
-        response = model.generate_content(
-            [video_file, prompt],
-            generation_config={"response_mime_type": "application/json"}
-        )
+        # --- BƯỚC 5: LƯU KẾT QUẢ ---
+        data = json.loads(response.text)
         
-        # Xóa file ngay sau khi xong
-        genai.delete_file(video_file.name)
-
-        # 4. Xử lý kết quả JSON
-        raw_text = response.text.strip()
-        if raw_text.startswith("```json"):
-            raw_text = raw_text.replace("```json", "").replace("```", "")
-            
-        data = json.loads(raw_text)
-
-        # 5. Lưu File JSON Kết quả
         result_data = {
             "filename": filename,
+            "question_index": q_num,
             "question": question_text,
             "transcript": data.get("transcript", "No transcript"),
             "score": data.get("score", 0),
-            "comment": data.get("comment", "No comment")
+            "comment": data.get("comment", "No comment"),
+            "timestamp": datetime.now(VN_TZ).strftime("%Y-%m-%d %H:%M:%S")
         }
-        
-        json_path = UPLOAD_DIR / (os.path.splitext(filename)[0] + ".json")
+
         with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(result_data, f, ensure_ascii=False)
+            json.dump(result_data, f, ensure_ascii=False, indent=2)
             
-        print(f"✅ [Done] {filename} -> Score: {result_data['score']}")
+        print(f"✅ [Done] Score: {result_data['score']}")
 
     except Exception as e:
-        print(f"❌ [Error] {filename}: {e}")
+        print(f"❌ [Error] {e}")
+        error_data = {"score": 0, "comment": "Error processing", "transcript": str(e)}
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(error_data, f)
+            
+    finally:
+        # Dọn dẹp: Xóa file audio tạm và file trên cloud
+        if audio_path and audio_path.exists():
+            os.remove(audio_path)
+        if uploaded_file:
+            try: genai.delete_file(uploaded_file.name)
+            except: pass
 
 # --- API ROUTES ---
 
@@ -126,16 +165,24 @@ async def home(): return (BASE_DIR / "static" / "index.html").read_text(encoding
 async def examiner(): return (BASE_DIR / "static" / "examiner.html").read_text(encoding="utf-8")
 
 @app.post("/api/upload")
-async def upload_video(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
-    filename = file.filename
-    safe_filename = "".join(c for c in filename if c.isalnum() or c in "._-")
+async def upload_video(
+    background_tasks: BackgroundTasks, 
+    file: UploadFile = File(...),
+    question_index: int = Form(...) # Nhận index từ frontend
+):
+    timestamp = datetime.now(VN_TZ).strftime("%Y%m%d_%H%M%S")
+    clean_name = "".join(c for c in file.filename if c.isalnum() or c in "._-")
+    safe_filename = f"{timestamp}_Q{question_index}_{clean_name}"
+    
     dest = UPLOAD_DIR / safe_filename
 
     try:
         with dest.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        # Kích hoạt background task
-        background_tasks.add_task(process_video_background, safe_filename)
+        
+        # Gửi vào background xử lý
+        background_tasks.add_task(process_video_background, safe_filename, question_index)
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -144,24 +191,22 @@ async def upload_video(background_tasks: BackgroundTasks, file: UploadFile = Fil
 @app.get("/api/results/{cname}")
 async def get_results(cname: str):
     if not UPLOAD_DIR.is_dir(): return {"completed": False}
-    
     results = []
-    # Quét tất cả file json của user này
-    for f in UPLOAD_DIR.glob(f"{cname}_Question_*.json"):
+    # Tìm file JSON kết quả
+    for f in UPLOAD_DIR.glob(f"*{cname}*.json"):
         try:
             with open(f, "r", encoding="utf-8") as jf:
                 results.append(json.load(jf))
         except: pass
     
-    results.sort(key=lambda x: x['filename'])
+    results.sort(key=lambda x: x.get('question_index', 0))
     
-    # Tính điểm trung bình
     avg = 0
     if results:
-        avg = round(sum(r['score'] for r in results) / len(results), 1)
+        avg = round(sum(r.get('score', 0) for r in results) / len(results), 1)
 
     return {
-        "completed": len(results) >= 5, # Kiểm tra đủ 5 câu
+        "completed": len(results) >= 5,
         "count": len(results),
         "avg_score": avg,
         "details": results
@@ -174,17 +219,17 @@ async def get_all_videos():
     files = sorted(UPLOAD_DIR.iterdir(), key=lambda f: f.stat().st_mtime, reverse=True)
     
     for f in files:
-        if f.is_file() and f.name.endswith(('.webm', '.mp4')):
+        if f.is_file() and f.suffix.lower() in ['.webm', '.mp4']:
             json_path = f.with_suffix('.json')
-            grading_status = "pending"
-            score = None
-            comment = ""
+            status = "pending"
+            score = 0
+            comment = "..."
             
             if json_path.exists():
                 try:
-                    with open(json_path) as jf:
+                    with open(json_path, encoding='utf-8') as jf:
                         data = json.load(jf)
-                        grading_status = "done"
+                        status = "done"
                         score = data.get('score', 0)
                         comment = data.get('comment', '')
                 except: pass
@@ -192,9 +237,8 @@ async def get_all_videos():
             videos.append({
                 "name": f.name,
                 "url": f"/uploads/{f.name}",
-                "size": f"{f.stat().st_size/1024/1024:.2f} MB",
-                "created": (datetime.utcfromtimestamp(f.stat().st_mtime) + timedelta(hours=7)).strftime("%d/%m %H:%M"),
-                "grading_status": grading_status,
+                "created": datetime.fromtimestamp(f.stat().st_mtime, tz=VN_TZ).strftime("%d/%m %H:%M"),
+                "grading_status": status,
                 "score": score,
                 "comment": comment
             })
@@ -212,5 +256,3 @@ async def delete_video(filename: str):
     (UPLOAD_DIR / filename).unlink(missing_ok=True)
     (UPLOAD_DIR / (os.path.splitext(filename)[0] + ".json")).unlink(missing_ok=True)
     return {"ok": True}
-
-
