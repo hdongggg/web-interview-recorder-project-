@@ -33,9 +33,9 @@ app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 QUESTIONS_DB = {
     1: "Please briefly introduce yourself.",
     2: "What are your greatest strengths and weaknesses?",
-    3: "Why do you want to apply for this position?",
-    4: "Describe a challenge you faced at work and how you overcame it.",
-    5: "What are your salary expectations?"
+    # 3: "Why do you want to apply for this position?",
+    # 4: "Describe a challenge you faced at work and how you overcame it.",
+    # 5: "What are your salary expectations?"
 }
 
 # --- BACKGROUND TASK (CHẤM ĐIỂM) ---
