@@ -3,240 +3,199 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Automated Interview System</title>
+    <title>AI Interview System</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; padding: 20px; background-color: #f0f2f5; }
-        
-        /* Screens (Steps) */
-        .screen { display: none; max-width: 700px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        body { font-family: 'Segoe UI', sans-serif; text-align: center; padding: 20px; background-color: #f0f2f5; }
+        .screen { display: none; max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
         .active { display: block; }
-
         h1, h2 { color: #333; }
-        input[type="text"] { padding: 12px; width: 70%; margin: 10px 0; border: 1px solid #ccc; border-radius: 5px; font-size: 16px; }
-        
-        /* Video Container */
+        input[type="text"] { padding: 12px; width: 70%; margin: 10px 0; border: 1px solid #ccc; border-radius: 5px; }
         #video-container { margin: 20px auto; border: 4px solid #3498db; border-radius: 8px; overflow: hidden; background: black; max-width: 640px;}
-        
-        /* Mirror Effect */
         video { width: 100%; display: block; transform: scaleX(-1); }
-
-        /* Buttons */
-        .controls button { padding: 12px 24px; margin: 10px; cursor: pointer; border: none; border-radius: 5px; font-size: 16px; font-weight: bold; transition: 0.3s; }
+        button { padding: 12px 24px; margin: 10px; cursor: pointer; border: none; border-radius: 5px; font-weight: bold; color: white; transition: 0.3s; }
+        .btn-p { background-color: #3498db; }
+        .btn-r { background-color: #e74c3c; }
+        .btn-s { background-color: #333; }
+        .btn-n { background-color: #2ecc71; display: none; }
+        button:disabled { background-color: #ccc; }
         
-        .btn-primary { background-color: #3498db; color: white; }
-        .btn-record { background-color: #e74c3c; color: white; }
-        .btn-stop { background-color: #333; color: white; }
-        
-        .btn-next { background-color: #2ecc71; color: white; display: none; } 
-        .btn-rerecord { background-color: #f39c12; color: white; display: none; } 
-        
-        button:disabled { background-color: #ccc; cursor: not-allowed; }
-
-        .question-box { background: #e8f4fd; padding: 15px; border-left: 5px solid #3498db; margin-bottom: 20px; text-align: left; }
-        .status-log { margin-top: 15px; font-weight: bold; color: #555; }
+        /* Bảng điểm */
+        .result-card { background: #f8f9fa; border: 1px solid #ddd; padding: 15px; margin-bottom: 10px; text-align: left; border-radius: 8px; }
+        .score-badge { float: right; background: #2ecc71; color: white; padding: 5px 10px; border-radius: 15px; font-weight: bold; }
+        .loader { border: 5px solid #f3f3f3; border-top: 5px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
 
     <div id="screen-login" class="screen active">
-        <h1>👋 Welcome to the Interview</h1>
-        <p>Please enter your full name to begin.</p>
-        <input type="text" id="candidateName" placeholder="e.g., John Doe">
-        <br>
-        <button class="btn-primary" onclick="startInterview()">Start Interview</button>
+        <h1>👋 AI Interview Login</h1>
+        <input type="text" id="candidateName" placeholder="Enter your full name (e.g., John Doe)">
+        <br><button class="btn-p" onclick="startInterview()">Start Interview</button>
     </div>
 
     <div id="screen-recorder" class="screen">
-        <div class="question-box">
-            <h3 id="question-title">Question 1:</h3>
-            <p id="question-content" style="font-size: 1.2em;">Loading question...</p>
-        </div>
-
-        <div id="video-container">
-            <video id="videoPlayer" autoplay muted></video>
-        </div>
-
+        <h3 id="question-title">Question 1</h3>
+        <p id="question-content" style="font-size: 1.2em; min-height: 50px;">...</p>
+        <div id="video-container"><video id="videoPlayer" autoplay muted></video></div>
         <div class="controls">
-            <button id="startBtn" class="btn-record" onclick="startRecording()">🔴 Start Recording</button>
-            <button id="stopBtn" class="btn-stop" onclick="stopRecording()" disabled>⏹️ Stop & Submit</button>
-            
-            <button id="nextBtn" class="btn-next" onclick="nextQuestion()">➡️ Next Question</button>
-            <button id="reRecordBtn" class="btn-rerecord" onclick="reRecord()">🔄 Re-record</button>
+            <button id="startBtn" class="btn-r" onclick="startRecording()">🔴 Record</button>
+            <button id="stopBtn" class="btn-s" onclick="stopRecording()" disabled>⏹️ Stop</button>
+            <button id="nextBtn" class="btn-n" onclick="nextQuestion()">➡️ Next</button>
         </div>
-
-        <p id="status" class="status-log">Camera ready...</p>
+        <p id="status">Ready...</p>
     </div>
 
-    <div id="screen-finish" class="screen">
-        <h1 style="color: green;">🎉 Congratulations!</h1>
-        <h2>You have completed the interview.</h2>
-        <p>Thank you for participating. Our team will review your submission shortly.</p>
-        <button class="btn-primary" onclick="location.reload()">Back to Home</button>
+    <div id="screen-result" class="screen">
+        <h1 id="result-title">⏳ Analyzing your answers...</h1>
+        <div id="loading-spinner" class="loader"></div>
+        <p id="result-message">Please wait while our AI grades your interview.<br>Processed: <span id="processed-count">0</span>/5</p>
+        
+        <div id="final-score-area" style="display:none;">
+            <h2 style="color: #2ecc71; font-size: 3em; margin: 10px 0;" id="avg-score">0.0</h2>
+            <p>Average Score</p>
+            <div id="details-list" style="margin-top: 20px;"></div>
+            <button class="btn-p" onclick="location.reload()">Back to Home</button>
+        </div>
     </div>
 
     <script>
-        // --- DATA CONFIGURATION ---
         const QUESTIONS = [
             "Please briefly introduce yourself.",
             "What are your greatest strengths and weaknesses?",
             "Why do you want to apply for this position?",
-            "Describe a challenge you faced at work and how you overcame it.",
-            "What are your salary and benefit expectations?"
+            "Describe a challenge you faced at work and how you overcame it?",
+            "What are your salary expectations?"
         ];
-
-        let currentQuestionIndex = 0;
-        let candidateName = "";
+        let curIdx = 0;
+        let cName = "";
         let mediaRecorder;
-        let recordedChunks = [];
+        let chunks = [];
         let stream;
-        
-        // --- UI LOGIC ---
-        
+        let pollInterval;
+
         async function startInterview() {
-            const input = document.getElementById('candidateName');
-            if (!input.value.trim()) {
-                alert("Please enter your name!");
-                return;
-            }
-            // 1. Save and Sanitize Name
-            candidateName = sanitizeName(input.value.trim()).replace(/\s+/g, '_');
+            const inp = document.getElementById('candidateName');
+            if (!inp.value.trim()) return alert("Enter name!");
+            cName = inp.value.trim().replace(/[^a-zA-Z0-9]/g, '_');
             
-            // 2. Switch Screen
             document.getElementById('screen-login').classList.remove('active');
             document.getElementById('screen-recorder').classList.add('active');
-
-            // 3. Setup Camera & Load Q1
             await setupCamera();
-            loadQuestion(0);
+            loadQ(0);
         }
 
-        function loadQuestion(index) {
-            // Update Text
-            document.getElementById('question-title').innerText = `Question ${index + 1} / ${QUESTIONS.length}`;
-            document.getElementById('question-content').innerText = QUESTIONS[index];
-            
-            // Reset Buttons
-            document.getElementById('startBtn').style.display = 'inline-block';
+        function loadQ(idx) {
+            document.getElementById('question-title').innerText = `Question ${idx + 1}/${QUESTIONS.length}`;
+            document.getElementById('question-content').innerText = QUESTIONS[idx];
             document.getElementById('startBtn').disabled = false;
-            document.getElementById('stopBtn').style.display = 'inline-block';
+            document.getElementById('startBtn').style.display = 'inline-block';
             document.getElementById('stopBtn').disabled = true;
-            
-            document.getElementById('nextBtn').style.display = 'none'; 
-            document.getElementById('reRecordBtn').style.display = 'none'; 
-            
-            document.getElementById('status').innerText = "Ready to record...";
-            document.getElementById('status').style.color = "#555";
-        }
-
-        function reRecord() {
-            loadQuestion(currentQuestionIndex);
+            document.getElementById('stopBtn').style.display = 'inline-block';
+            document.getElementById('nextBtn').style.display = 'none';
+            document.getElementById('status').innerText = "Ready...";
         }
 
         function nextQuestion() {
-            currentQuestionIndex++;
-            
-            if (currentQuestionIndex < QUESTIONS.length) {
-                loadQuestion(currentQuestionIndex);
+            curIdx++;
+            if (curIdx < QUESTIONS.length) {
+                loadQ(curIdx);
             } else {
                 stopCamera();
-                document.getElementById('screen-recorder').classList.remove('active');
-                document.getElementById('screen-finish').classList.add('active');
+                showResultScreen();
             }
         }
 
-        // --- CAMERA LOGIC ---
-
+        // --- CAMERA ---
         async function setupCamera() {
             try {
                 stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
                 document.getElementById('videoPlayer').srcObject = stream;
-            } catch (err) {
-                alert("Cannot access Camera. Please allow permissions!");
-            }
+            } catch { alert("Camera Error"); }
         }
-
-        function stopCamera() {
-            if(stream) stream.getTracks().forEach(track => track.stop());
-        }
+        function stopCamera() { if(stream) stream.getTracks().forEach(t => t.stop()); }
 
         function startRecording() {
-            recordedChunks = [];
+            chunks = [];
             mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
-
-            mediaRecorder.ondataavailable = event => {
-                if (event.data.size > 0) recordedChunks.push(event.data);
-            };
-
-            mediaRecorder.onstop = uploadVideo; 
-
+            mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+            mediaRecorder.onstop = uploadVideo;
             mediaRecorder.start();
-            
-            // Update UI
             document.getElementById('startBtn').disabled = true;
             document.getElementById('stopBtn').disabled = false;
             document.getElementById('status').innerText = "🔴 Recording...";
-            document.getElementById('status').style.color = "red";
         }
-
         function stopRecording() {
             mediaRecorder.stop();
             document.getElementById('stopBtn').disabled = true;
-            document.getElementById('status').innerText = "⏳ Processing & Uploading...";
-            document.getElementById('status').style.color = "orange";
+            document.getElementById('status').innerText = "⏳ Uploading (Background processing)...";
         }
 
         async function uploadVideo() {
-            const blob = new Blob(recordedChunks, { type: 'video/webm' });
-            
-            // Filename: NguyenVanA_Question_1.webm
-            const filename = `${candidateName}_Question_${currentQuestionIndex + 1}.webm`;
-
-            const formData = new FormData();
-            formData.append('file', blob, filename); 
+            const blob = new Blob(chunks, { type: 'video/webm' });
+            const fname = `${cName}_Question_${curIdx + 1}.webm`;
+            const fd = new FormData();
+            fd.append('file', blob, fname);
 
             try {
-                const response = await fetch('/api/upload', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                if (response.ok) {
-                    document.getElementById('status').innerText = "✅ Submission successful!";
-                    document.getElementById('status').style.color = "green";
-
-                    // Hide Record/Stop
+                // Upload và server sẽ trả về ngay lập tức (không đợi AI)
+                const res = await fetch('/api/upload', { method: 'POST', body: fd });
+                if (res.ok) {
+                    document.getElementById('status').innerText = "✅ Uploaded! AI is grading in background.";
                     document.getElementById('startBtn').style.display = 'none';
                     document.getElementById('stopBtn').style.display = 'none';
-                    
-                    // Show Next/Re-record
                     document.getElementById('nextBtn').style.display = 'inline-block';
-                    document.getElementById('reRecordBtn').style.display = 'inline-block';
-                } else {
-                    throw new Error("Server Error");
                 }
-            } catch (error) {
-                document.getElementById('status').innerText = "❌ Upload failed. Please try again.";
-                document.getElementById('startBtn').disabled = false; 
-            }
+            } catch { alert("Upload Failed"); }
         }
 
-        // Helper: Remove Vietnamese Tones (Sanitize Name)
-        function sanitizeName(str) {
-            str = str.replace(/à|á|ạ|ả|ã|â|ầ|ấ|ậ|ẩ|ẫ|ă|ằ|ắ|ặ|ẳ|ẵ/g,"a"); 
-            str = str.replace(/è|é|ẹ|ẻ|ẽ|ê|ề|ế|ệ|ể|ễ/g,"e"); 
-            str = str.replace(/ì|í|ị|ỉ|ĩ/g,"i"); 
-            str = str.replace(/ò|ó|ọ|ỏ|õ|ô|ồ|ố|ộ|ổ|ỗ|ơ|ờ|ớ|ợ|ở|ỡ/g,"o"); 
-            str = str.replace(/ù|ú|ụ|ủ|ũ|ư|ừ|ứ|ự|ử|ữ/g,"u"); 
-            str = str.replace(/ỳ|ý|ỵ|ỷ|ỹ/g,"y"); 
-            str = str.replace(/đ/g,"d");
-            str = str.replace(/À|Á|Ạ|Ả|Ã|Â|Ầ|Ấ|Ậ|Ẩ|Ẫ|Ă|Ằ|Ắ|Ặ|Ẳ|Ẵ/g, "A");
-            str = str.replace(/È|É|Ẹ|Ẻ|Ẽ|Ê|Ề|Ế|Ệ|Ể|Ễ/g, "E");
-            str = str.replace(/Ì|Í|Ị|Ỉ|Ĩ/g, "I");
-            str = str.replace(/Ò|Ó|Ọ|Ỏ|Õ|Ô|Ồ|Ố|Ộ|Ổ|Ỗ|Ơ|Ờ|Ớ|Ợ|Ở|Ỡ/g, "O");
-            str = str.replace(/Ù|Ú|Ụ|Ủ|Ũ|Ư|Ừ|Ứ|Ự|Ử|Ữ/g, "U");
-            str = str.replace(/Ỳ|Ý|Ỵ|Ỷ|Ỹ/g, "Y");
-            str = str.replace(/Đ/g, "D");
-            return str;
+        // --- POLLING RESULTS ---
+        function showResultScreen() {
+            document.getElementById('screen-recorder').classList.remove('active');
+            document.getElementById('screen-result').classList.add('active');
+            
+            // Bắt đầu hỏi server mỗi 3 giây
+            pollInterval = setInterval(checkResults, 3000);
+        }
+
+        async function checkResults() {
+            try {
+                const res = await fetch(`/api/results/${cName}`);
+                const data = await res.json();
+                
+                document.getElementById('processed-count').innerText = data.count;
+
+                if (data.completed) {
+                    clearInterval(pollInterval); // Dừng hỏi
+                    renderFinalResults(data);
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        function renderFinalResults(data) {
+            document.getElementById('loading-spinner').style.display = 'none';
+            document.getElementById('result-title').innerText = "🎉 Evaluation Complete!";
+            document.getElementById('result-message').style.display = 'none';
+            document.getElementById('final-score-area').style.display = 'block';
+            
+            document.getElementById('avg-score').innerText = data.avg_score;
+            
+            const list = document.getElementById('details-list');
+            list.innerHTML = "";
+            
+            data.details.forEach(item => {
+                list.innerHTML += `
+                    <div class="result-card">
+                        <span class="score-badge">${item.score}/10</span>
+                        <strong>${item.question}</strong><br>
+                        <em style="color:#666; font-size:0.9em">"${item.comment}"</em>
+                        <details style="margin-top:5px; color:#888;">
+                            <summary>Transcript</summary>
+                            <small>${item.transcript}</small>
+                        </details>
+                    </div>
+                `;
+            });
         }
     </script>
 </body>
