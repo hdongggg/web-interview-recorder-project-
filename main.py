@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks
+from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, 
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,10 +41,9 @@ QUESTIONS_DB = {
     4: "Describe a challenge you faced at work and how you overcame it.",
     5: "What are your salary expectations?"
 }
-
-# --- HÀM CHẠY NGẦM (QUY TRÌNH 2 BƯỚC: STT -> TEXT -> GRADING) ---
-def process_video_background(filename: str):
-    print(f"🚀 [Step 1] Start Processing: {filename}")
+# --- HÀM CHẠY NGẦM (GIỮ PROMPT CỦA BẠN + THÊM CHECK DURATION) ---
+def process_video_background(filename: str, duration: float):
+    print(f"🚀 [Step 1] Start Processing: {filename} (Duration: {duration}s)")
     file_path = UPLOAD_DIR / filename
     
     # Lấy câu hỏi
@@ -54,6 +53,23 @@ def process_video_background(filename: str):
         question_text = QUESTIONS_DB.get(q_num, "General Question")
     except:
         question_text = "General Question"
+
+    # --- [MỚI] KIỂM TRA THỜI GIAN NGAY TỪ ĐẦU ---
+    if duration < 5:
+        print(f"⚠️ Video quá ngắn ({duration}s). Bỏ qua AI.")
+        result_data = {
+            "filename": filename,
+            "question": question_text,
+            "transcript": "(No speech detected - Video < 5s)",
+            "score": 0,
+            "comment": "Câu trả lời quá ngắn (dưới 5 giây). Vui lòng trả lời đầy đủ hơn."
+        }
+        # Lưu file JSON ngay lập tức
+        json_path = UPLOAD_DIR / (os.path.splitext(filename)[0] + ".json")
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(result_data, f, ensure_ascii=False, indent=2)
+        return # DỪNG HÀM TẠI ĐÂY
+    # ----------------------------------------------
 
     try:
         # --- BƯỚC 1: SPEECH TO TEXT (STT) ---
@@ -71,7 +87,8 @@ def process_video_background(filename: str):
             return
 
         # 1.3 Gọi Gemini lấy Transcript (Chỉ lấy chữ)
-        model = genai.GenerativeModel(model_name="gemini-2.5-flash")
+        # Lưu ý: Đã sửa về gemini-2.0-flash cho ổn định
+        model = genai.GenerativeModel(model_name="gemini-2.0-flash")
         
         print(f"🎤 [Step 1] Transcribing...")
         stt_response = model.generate_content(
@@ -83,7 +100,7 @@ def process_video_background(filename: str):
         transcript_text = stt_response.text.strip()
         print(f"📝 [Step 1] Transcript done (Len: {len(transcript_text)})")
 
-        # [QUAN TRỌNG] Xóa file video trên cloud NGAY LẬP TỨC để nhẹ gánh
+        # [QUAN TRỌNG] Xóa file video trên cloud NGAY LẬP TỨC
         genai.delete_file(video_file.name)
 
 
@@ -91,6 +108,7 @@ def process_video_background(filename: str):
         
         print(f"🧠 [Step 2] Grading text...")
         
+        # [GIỮ NGUYÊN PROMPT CỦA BẠN]
         prompt_grading = f"""
         Act as a Professional Recruiter.
         These are your criterias to mark for questions:
@@ -117,7 +135,7 @@ def process_video_background(filename: str):
         grading_response = model.generate_content(
             prompt_grading,
             generation_config={"response_mime_type": "application/json"},
-            request_options={"timeout": 180} # <-- THÊM DÒNG NÀY VÀO
+            request_options={"timeout": 180} 
         )
 
         # Xử lý JSON kết quả
@@ -138,7 +156,7 @@ def process_video_background(filename: str):
         
         json_path = UPLOAD_DIR / (os.path.splitext(filename)[0] + ".json")
         with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(result_data, f, ensure_ascii=False)
+            json.dump(result_data, f, ensure_ascii=False, indent=2)
             
         print(f"✅ [Finish] {filename} -> Score: {result_data['score']}")
 
@@ -157,7 +175,6 @@ def process_video_background(filename: str):
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(error_data, f)
         except: pass
-
 # --- API ROUTES ---
 
 @app.get("/", response_class=HTMLResponse)
@@ -167,16 +184,24 @@ async def home(): return (BASE_DIR / "static" / "index.html").read_text(encoding
 async def examiner(): return (BASE_DIR / "static" / "examiner.html").read_text(encoding="utf-8")
 
 @app.post("/api/upload")
-async def upload_video(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+async def upload_video(
+    background_tasks: BackgroundTasks, 
+    file: UploadFile = File(...), 
+    duration: float = Form(...) # <--- [QUAN TRỌNG] Nhận thời lượng từ Frontend gửi lên
+):
     filename = file.filename
+    # Làm sạch tên file (giữ nguyên logic ghi đè cho Re-record)
     safe_filename = "".join(c for c in filename if c.isalnum() or c in "._-")
     dest = UPLOAD_DIR / safe_filename
 
     try:
+        # Lưu file video vào ổ đĩa
         with dest.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        # Chạy ngầm quy trình 2 bước
-        background_tasks.add_task(process_video_background, safe_filename)
+        
+        # [QUAN TRỌNG] Truyền 'duration' vào hàm xử lý ngầm
+        background_tasks.add_task(process_video_background, safe_filename, duration)
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
