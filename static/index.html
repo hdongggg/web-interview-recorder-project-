@@ -270,6 +270,9 @@
         let curIdx = 0;
         let cName = "";
         let mediaRecorder, chunks = [], stream, pollInterval;
+        
+        // [1] THÊM BIẾN THỜI GIAN
+        let startTime = 0;
 
         // --- UI UTILS ---
         function updateProgress() {
@@ -350,6 +353,10 @@
 
         function startRecording() {
             chunks = [];
+            
+            // [2] BẮT ĐẦU TÍNH GIỜ
+            startTime = Date.now();
+
             const options = { mimeType: 'video/webm;codecs=vp8,opus', videoBitsPerSecond: 100000 };
             try { mediaRecorder = new MediaRecorder(stream, options); } 
             catch { mediaRecorder = new MediaRecorder(stream); }
@@ -376,11 +383,20 @@
             const fname = `${cName}_Question_${curIdx+1}.webm`;
             const fd = new FormData();
             fd.append('file', blob, fname);
+            
+            // [3] TÍNH VÀ GỬI DURATION
+            const duration = (Date.now() - startTime) / 1000;
+            fd.append('duration', duration);
 
             try {
                 const res = await fetch('/api/upload', {method:'POST', body:fd});
                 if(res.ok) {
-                    setStatus("Answer submitted! AI is grading.", 'success');
+                    // Logic hiển thị thông báo nếu quá ngắn
+                    if (duration < 5) {
+                        setStatus(`⚠️ Video too short (${duration.toFixed(1)}s). Score: 0/10.`, 'error');
+                    } else {
+                        setStatus("Answer submitted! AI is grading.", 'success');
+                    }
                     
                     document.getElementById('startBtn').style.display = 'none';
                     document.getElementById('stopBtn').style.display = 'none';
