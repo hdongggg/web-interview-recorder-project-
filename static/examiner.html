@@ -132,6 +132,43 @@
                 loadVideos(); 
             }
         }
+        async function getReport(cname) {
+            if(!confirm(`Generate full report for ${cname}? This requires 5 submitted questions.`)) return;
+            
+            try {
+                // Hiển thị trạng thái chờ tải
+                document.getElementById('list').innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--primary);">⏳ Generating report... Please wait.</td></tr>';
+
+                const res = await fetch(`/api/report/${cname}`);
+                
+                if (res.status === 404 || res.status === 400) {
+                     alert("ERROR: This candidate has not completed 5 questions yet.");
+                     loadVideos();
+                     return;
+                }
+                
+                const data = await res.json();
+                
+                if (data.ok) {
+                    // Tự động tải file về
+                    const a = document.createElement('a');
+                    a.href = data.url;
+                    a.download = `REPORT_${cname}.txt`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    alert(`Report saved as REPORT_${cname}.txt!`);
+                    loadVideos(); // Tải lại giao diện sau khi xong
+                } else {
+                    alert("Unknown error during report generation.");
+                    loadVideos();
+                }
+            } catch(e) { 
+                alert("Critical error creating report. Check console."); 
+                console.error(e);
+                loadVideos();
+            }
+        }
         
         async function nuke() {
             if(confirm('WARNING: This will delete ALL videos and scores. Continue?')) { 
