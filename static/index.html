@@ -201,11 +201,15 @@
             document.getElementById('status').innerText = "⏳ Uploading...";
         }
 
-        async function uploadVideo() {
+async function uploadVideo() {
             const blob = new Blob(chunks, {type:'video/webm'});
-            const fname = `${cName}_Question_${curIdx+1}.webm`;
+            // Tên file chỉ mang tính gợi nhớ, Backend sẽ đổi tên lại cho an toàn
+            const fname = `${cName}_video.webm`; 
+            
             const fd = new FormData();
             fd.append('file', blob, fname);
+            // QUAN TRỌNG: Gửi kèm số thứ tự câu hỏi (Backend cần cái này)
+            fd.append('question_index', curIdx + 1); 
 
             try {
                 const res = await fetch('/api/upload', {method:'POST', body:fd});
@@ -216,15 +220,19 @@
                     document.getElementById('stopBtn').style.display = 'none';
                     document.getElementById('reRecordBtn').style.display = 'inline-block';
 
-                    // LOGIC CHUYỂN NÚT
                     if (curIdx === QUESTIONS.length - 1) {
                         document.getElementById('finishBtn').style.display = 'inline-block';
                     } else {
                         document.getElementById('nextBtn').style.display = 'inline-block';
                     }
+                } else {
+                    alert("Server Error. Check console.");
                 }
-            } catch { alert("Upload Failed"); }
+            } catch (e) { 
+                console.error(e);
+                alert("Upload Failed"); 
+            }
         }
-    </script>
+</script>
 </body>
 </html>
