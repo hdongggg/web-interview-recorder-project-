@@ -7,87 +7,153 @@
     <style>
         body { font-family: 'Segoe UI', sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background-color: #f8f9fa; }
         h1 { text-align: center; color: #333; }
+        
+        /* Bảng */
         table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
         th, td { border-bottom: 1px solid #ddd; padding: 15px; text-align: left; vertical-align: middle; }
         th { background-color: #007bff; color: white; }
         
-        .badge-pending { background: #f1c40f; color: black; padding: 5px 10px; border-radius: 15px; font-weight: bold; font-size: 0.85em; }
-        .badge-score { background: #2ecc71; color: white; padding: 5px 10px; border-radius: 15px; font-weight: bold; font-size: 1.1em; }
+        /* Trạng thái chấm điểm */
+        .badge-pending { 
+            background: #fff3cd; color: #856404; border: 1px solid #ffeeba;
+            padding: 5px 10px; border-radius: 20px; font-weight: bold; font-size: 0.85em; 
+            display: inline-block;
+        }
+        .badge-score { 
+            background: #d4edda; color: #155724; border: 1px solid #c3e6cb;
+            padding: 5px 15px; border-radius: 20px; font-weight: bold; font-size: 1.1em; 
+            display: inline-block;
+        }
         
-        .btn { padding: 6px 12px; margin: 2px; border-radius: 4px; border: none; cursor: pointer; color: white; font-weight: bold; font-size: 13px; text-decoration: none; display: inline-block; }
+        /* Nút bấm */
+        .btn { padding: 6px 12px; margin: 2px; border-radius: 4px; border: none; cursor: pointer; color: white; font-weight: bold; font-size: 13px; text-decoration: none; display: inline-block; transition: 0.2s;}
+        .btn:hover { opacity: 0.8; }
         .btn-watch { background: #17a2b8; }
         .btn-del { background: #dc3545; }
+        
+        /* Video Preview */
+        #preview-modal {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8); display: none;
+            justify-content: center; align-items: center; z-index: 1000;
+        }
+        .preview-content {
+            background: black; padding: 20px; border-radius: 8px; position: relative;
+            max-width: 90%; max-height: 90%;
+        }
     </style>
 </head>
 <body>
 
     <h1>📋 Interview Progress & AI Scoring</h1>
-    <div style="text-align: right; margin-bottom: 10px;">
-        <button class="btn btn-del" onclick="nuke()">🗑️ Clear All Data</button>
-        <button class="btn btn-watch" onclick="loadVideos()">🔄 Refresh List</button>
+    
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+        <span style="color: #666;">Auto-refreshing every 5s...</span>
+        <div>
+            <button class="btn btn-del" onclick="nuke()">🗑️ Clear All Data</button>
+            <button class="btn btn-watch" onclick="loadVideos()">🔄 Refresh Now</button>
+        </div>
     </div>
 
     <table>
         <thead>
             <tr>
-                <th style="width: 25%">Candidate / File</th>
-                <th style="width: 15%">Time</th>
-                <th style="width: 20%">AI Score</th> <th style="width: 25%">AI Comment</th>
+                <th style="width: 30%">Candidate / File</th>
+                <th style="width: 15%">Submitted Time</th>
+                <th style="width: 15%">AI Score</th> 
+                <th style="width: 25%">AI Comment</th>
                 <th style="width: 15%">Actions</th>
             </tr>
         </thead>
         <tbody id="list"></tbody>
     </table>
 
-    <div id="preview" style="text-align:center; margin-top:20px;"></div>
+    <div id="preview-modal" onclick="closePreview()">
+        <div class="preview-content" onclick="event.stopPropagation()">
+            <div id="video-place"></div>
+            <button class="btn btn-del" style="width: 100%; margin-top: 10px;" onclick="closePreview()">Close</button>
+        </div>
+    </div>
 
     <script>
+        // Hàm tải dữ liệu
         async function loadVideos() {
-            const res = await fetch('/api/videos');
-            const videos = await res.json();
-            const el = document.getElementById('list');
-            el.innerHTML = '';
+            try {
+                const res = await fetch('/api/videos');
+                const videos = await res.json();
+                const el = document.getElementById('list');
+                el.innerHTML = '';
 
-            if (videos.length === 0) el.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px">No videos.</td></tr>';
-
-            videos.forEach(v => {
-                // Xử lý hiển thị cột điểm
-                let scoreDisplay = `<span class="badge-pending">⏳ Grading...</span>`;
-                if (v.grading_status === 'done') {
-                    scoreDisplay = `<span class="badge-score">${v.score}/10</span>`;
+                if (videos.length === 0) {
+                    el.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:#777;">No videos found. Waiting for candidates...</td></tr>';
+                    return;
                 }
 
-                el.innerHTML += `
-                    <tr>
-                        <td><strong>${v.name}</strong></td>
-                        <td>${v.created}</td>
-                        <td>${scoreDisplay}</td>
-                        <td><small style="color:#555">${v.comment || 'Processing...'}</small></td>
-                        <td>
-                            <a href="#" class="btn btn-watch" onclick="play('${v.url}'); return false;">👁️ Watch</a>
-                            <button class="btn btn-del" onclick="del('${v.name}')">🗑️</button>
-                        </td>
-                    </tr>
-                `;
-            });
+                videos.forEach(v => {
+                    // Logic hiển thị điểm số
+                    let scoreDisplay = `<span class="badge-pending">⏳ Grading...</span>`;
+                    let commentDisplay = `<span style="color:#999; font-style:italic;">Processing...</span>`;
+                    
+                    // Nếu Backend báo đã chấm xong (done)
+                    if (v.grading_status === 'done') {
+                        // Tô màu điểm số dựa trên thang điểm
+                        let colorStyle = "";
+                        if(v.score >= 8) colorStyle = "background:#d4edda; color:#155724; border-color:#c3e6cb;"; // Xanh (Giỏi)
+                        else if(v.score >= 5) colorStyle = "background:#fff3cd; color:#856404; border-color:#ffeeba;"; // Vàng (Khá)
+                        else colorStyle = "background:#f8d7da; color:#721c24; border-color:#f5c6cb;"; // Đỏ (Yếu)
+
+                        scoreDisplay = `<span class="badge-score" style="${colorStyle}">${v.score}/10</span>`;
+                        commentDisplay = `<small style="color:#333">${v.comment}</small>`;
+                    }
+
+                    el.innerHTML += `
+                        <tr>
+                            <td>
+                                <strong>${v.name}</strong><br>
+                                <small style="color:#666">${v.size}</small>
+                            </td>
+                            <td>${v.created}</td>
+                            <td>${scoreDisplay}</td>
+                            <td>${commentDisplay}</td>
+                            <td>
+                                <button class="btn btn-watch" onclick="play('${v.url}')">👁️ Watch</button>
+                                <button class="btn btn-del" onclick="del('${v.name}')">🗑️</button>
+                            </td>
+                        </tr>
+                    `;
+                });
+            } catch (e) { console.error("Load error:", e); }
         }
 
+        // --- Các hàm tiện ích ---
         async function del(name) {
-            if(confirm('Delete?')) { await fetch(`/api/video/${name}`, {method:'DELETE'}); loadVideos(); }
+            if(confirm('Are you sure you want to delete this video?')) { 
+                await fetch(`/api/video/${name}`, {method:'DELETE'}); 
+                loadVideos(); 
+            }
         }
+        
         async function nuke() {
-            if(confirm('Delete ALL?')) { await fetch('/api/nuke-all-videos', {method:'DELETE'}); loadVideos(); }
-        }
-        function play(url) {
-            document.getElementById('preview').innerHTML = `
-                <div style="background:black; padding:10px; display:inline-block; border-radius:8px;">
-                    <video controls autoplay src="${url}" style="max-height:300px"></video><br>
-                    <button class="btn btn-del" onclick="this.parentElement.remove()">Close</button>
-                </div>`;
+            if(confirm('WARNING: This will delete ALL videos and scores. Continue?')) { 
+                await fetch('/api/nuke-all-videos', {method:'DELETE'}); 
+                loadVideos(); 
+            }
         }
 
+        function play(url) {
+            document.getElementById('video-place').innerHTML = `<video controls autoplay src="${url}" style="max-height:400px; max-width:100%"></video>`;
+            document.getElementById('preview-modal').style.display = 'flex';
+        }
+        
+        function closePreview() {
+            document.getElementById('preview-modal').style.display = 'none';
+            document.getElementById('video-place').innerHTML = ''; // Dừng video
+        }
+
+        // Chạy lần đầu
         loadVideos();
-        // Tự động refresh mỗi 5 giây để cập nhật điểm số mới
+        
+        // Tự động cập nhật mỗi 5 giây (Real-time update)
         setInterval(loadVideos, 5000);
     </script>
 </body>
