@@ -13,7 +13,7 @@ import google.generativeai as genai
 app = FastAPI(title="AI Interviewer")
 
 # --- CẤU HÌNH ---
-GOOGLE_API_KEY = "AIzaSyD7d78Goxctsn7OohpVKp-ggUT3jgC9tZs" # <--- THAY KEY CỦA BẠN VÀO ĐÂY
+GOOGLE_API_KEY = "AIzaSyBf1Ml3WzWX1XRNc8lNALRqWnBb3Hy2Fvo" # <--- THAY KEY CỦA BẠN VÀO ĐÂY
 genai.configure(api_key=GOOGLE_API_KEY)
 
 app.add_middleware(
