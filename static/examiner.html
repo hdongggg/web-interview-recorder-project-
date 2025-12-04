@@ -9,38 +9,30 @@
         h1 { text-align: center; color: #333; }
         
         /* Bảng */
-        table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
-        th, td { border-bottom: 1px solid #ddd; padding: 15px; text-align: left; vertical-align: middle; }
-        th { background-color: #007bff; color: white; }
+        table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; table-layout: fixed; }
+        th, td { border-bottom: 1px solid #ddd; padding: 15px; text-align: left; vertical-align: top; word-wrap: break-word; }
+        th { background-color: #007bff; color: white; font-weight: 600; }
         
-        /* Trạng thái chấm điểm */
-        .badge-pending { 
-            background: #fff3cd; color: #856404; border: 1px solid #ffeeba;
-            padding: 5px 10px; border-radius: 20px; font-weight: bold; font-size: 0.85em; 
-            display: inline-block;
-        }
-        .badge-score { 
-            background: #d4edda; color: #155724; border: 1px solid #c3e6cb;
-            padding: 5px 15px; border-radius: 20px; font-weight: bold; font-size: 1.1em; 
-            display: inline-block;
-        }
+        /* Badges */
+        .badge-pending { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; padding: 4px 10px; border-radius: 12px; font-weight: bold; font-size: 0.85em; display: inline-block; margin-bottom: 5px;}
+        .badge-score { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; padding: 4px 10px; border-radius: 12px; font-weight: bold; font-size: 1.1em; display: inline-block; margin-bottom: 5px;}
         
-        /* Nút bấm */
-        .btn { padding: 6px 12px; margin: 2px; border-radius: 4px; border: none; cursor: pointer; color: white; font-weight: bold; font-size: 13px; text-decoration: none; display: inline-block; transition: 0.2s;}
+        /* Buttons */
+        .btn { padding: 6px 12px; margin: 2px; border-radius: 4px; border: none; cursor: pointer; color: white; font-weight: bold; font-size: 12px; text-decoration: none; display: inline-block; transition: 0.2s;}
         .btn:hover { opacity: 0.8; }
         .btn-watch { background: #17a2b8; }
+        .btn-stt { background: #6f42c1; } 
         .btn-del { background: #dc3545; }
+        .btn-report { background: #28a745; width: 100%; margin-top: 5px; } 
+        .btn-download-small { background-color: #28a745; font-size: 11px; padding: 3px 8px; }
+
+        /* Transcript */
+        .transcript-box { margin-top: 10px; padding: 10px; background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 4px; font-size: 13px; color: #333; display: none; }
+        .transcript-content { max-height: 150px; overflow-y: auto; white-space: pre-wrap; margin-bottom: 5px; }
         
-        /* Video Preview */
-        #preview-modal {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.8); display: none;
-            justify-content: center; align-items: center; z-index: 1000;
-        }
-        .preview-content {
-            background: black; padding: 20px; border-radius: 8px; position: relative;
-            max-width: 90%; max-height: 90%;
-        }
+        /* Video Preview Modal */
+        #preview-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: none; justify-content: center; align-items: center; z-index: 1000; }
+        .preview-content { background: black; padding: 10px; border-radius: 8px; position: relative; max-width: 90%; max-height: 90%; }
     </style>
 </head>
 <body>
@@ -48,7 +40,7 @@
     <h1>📋 Interview Progress & AI Scoring</h1>
     
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-        <span style="color: #666;">Auto-refreshing every 5s...</span>
+        <span style="color: #666; font-size: 0.9em;">Auto-refreshing every 5s...</span>
         <div>
             <button class="btn btn-del" onclick="nuke()">🗑️ Clear All Data</button>
             <button class="btn btn-watch" onclick="loadVideos()">🔄 Refresh Now</button>
@@ -58,11 +50,9 @@
     <table>
         <thead>
             <tr>
-                <th style="width: 30%">Candidate / File</th>
-                <th style="width: 15%">Submitted Time</th>
-                <th style="width: 15%">AI Score</th> 
-                <th style="width: 25%">AI Comment</th>
-                <th style="width: 15%">Actions</th>
+                <th style="width: 25%">Candidate / File</th>
+                <th style="width: 15%">Time</th>
+                <th style="width: 40%">AI Analysis</th> <th style="width: 20%">Actions</th>
             </tr>
         </thead>
         <tbody id="list"></tbody>
@@ -85,39 +75,64 @@
                 el.innerHTML = '';
 
                 if (videos.length === 0) {
-                    el.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:#777;">No videos found. Waiting for candidates...</td></tr>';
+                    el.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:#777;">No videos found. Waiting for candidates...</td></tr>';
                     return;
                 }
 
                 videos.forEach(v => {
-                    // Logic hiển thị điểm số
-                    let scoreDisplay = `<span class="badge-pending">⏳ Grading...</span>`;
-                    let commentDisplay = `<span style="color:#999; font-style:italic;">Processing...</span>`;
+                    // [QUAN TRỌNG] Lấy tên file thực tế từ URL để dùng cho các hành động (Xóa/Dịch)
+                    // URL: /uploads/1709..._NguyenVanA_Question_1.webm -> Filename: 1709..._NguyenVanA_Question_1.webm
+                    const realFilename = v.url.split('/').pop();
                     
-                    // Nếu Backend báo đã chấm xong (done)
-                    if (v.grading_status === 'done') {
-                        // Tô màu điểm số dựa trên thang điểm
-                        let colorStyle = "";
-                        if(v.score >= 8) colorStyle = "background:#d4edda; color:#155724; border-color:#c3e6cb;"; // Xanh (Giỏi)
-                        else if(v.score >= 5) colorStyle = "background:#fff3cd; color:#856404; border-color:#ffeeba;"; // Vàng (Khá)
-                        else colorStyle = "background:#f8d7da; color:#721c24; border-color:#f5c6cb;"; // Đỏ (Yếu)
+                    // Trích xuất tên ứng viên cho nút Report
+                    // Regex tìm chuỗi giữa dấu _ đầu tiên và _Question_
+                    // Ví dụ: 1234_NguyenVanA_Question_1 -> NguyenVanA
+                    let candidateNameRaw = "";
+                    const nameMatch = realFilename.match(/_\d+_([a-zA-Z0-9_]+)_Question_/);
+                    if (nameMatch && nameMatch[1]) {
+                        candidateNameRaw = nameMatch[1];
+                    } else {
+                        // Fallback nếu không khớp format mới
+                        candidateNameRaw = realFilename.split('_Question_')[0];
+                    }
 
-                        scoreDisplay = `<span class="badge-score" style="${colorStyle}">${v.score}/10</span>`;
-                        commentDisplay = `<small style="color:#333">${v.comment}</small>`;
+                    // Logic hiển thị điểm
+                    let analysisContent = "";
+                    if (v.grading_status === 'done') {
+                        // Đã chấm xong: Hiện điểm + Comment + Transcript có sẵn
+                        let colorStyle = v.score >= 8 ? "background:#d4edda; color:#155724; border-color:#c3e6cb;" : 
+                                         (v.score >= 5 ? "background:#fff3cd; color:#856404; border-color:#ffeeba;" : "background:#f8d7da; color:#721c24; border-color:#f5c6cb;");
+                        
+                        // Transcript rút gọn
+                        let shortTrans = v.transcript_preview ? v.transcript_preview.replace(/^\[Score.*?\]\s*/, '') : "No transcript";
+                        
+                        analysisContent = `
+                            <span class="badge-score" style="${colorStyle}">${v.score}/10</span>
+                            <br><small style="font-style:italic;">"${v.comment}"</small>
+                            <details style="margin-top:5px; cursor:pointer;">
+                                <summary style="font-size:11px; color:#007bff;">Show Transcript</summary>
+                                <div style="font-size:12px; margin-top:5px; white-space: pre-wrap; max-height:100px; overflow-y:auto;">${shortTrans}</div>
+                            </details>
+                        `;
+                    } else {
+                        // Đang chấm
+                        analysisContent = `<span class="badge-pending">⏳ Grading...</span><br><small style="color:#999">AI is processing...</small>`;
                     }
 
                     el.innerHTML += `
                         <tr>
                             <td>
-                                <strong>${v.name}</strong><br>
-                                <small style="color:#666">${v.size}</small>
+                                <strong>${v.name}</strong> <br><small style="color:#666">${v.size}</small>
+                                <button class="btn btn-report" onclick="getReport('${candidateNameRaw}')">
+                                    📄 Get Full Report
+                                </button>
                             </td>
                             <td>${v.created}</td>
-                            <td>${scoreDisplay}</td>
-                            <td>${commentDisplay}</td>
+                            <td>${analysisContent}</td>
                             <td>
                                 <button class="btn btn-watch" onclick="play('${v.url}')">👁️ Watch</button>
-                                <button class="btn btn-del" onclick="del('${v.name}')">🗑️</button>
+                                <button class="btn btn-del" onclick="del('${realFilename}')">🗑️ Del</button>
+                                <button class="btn btn-stt" onclick="transcribeVideo('${realFilename}', this)">✨ Re-Check</button>
                             </td>
                         </tr>
                     `;
@@ -126,52 +141,44 @@
         }
 
         // --- Các hàm tiện ích ---
-        async function del(name) {
-            if(confirm('Are you sure you want to delete this video?')) { 
-                await fetch(`/api/video/${name}`, {method:'DELETE'}); 
-                loadVideos(); 
-            }
+        async function del(filename) {
+            if(!confirm('Delete this video?')) return;
+            await fetch(`/api/video/${filename}`, {method:'DELETE'}); 
+            loadVideos(); 
         }
+        
         async function getReport(cname) {
-            if(!confirm(`Generate full report for ${cname}? This requires 5 submitted questions.`)) return;
-            
+            if(!confirm(`Generate full report for candidate: ${cname}?`)) return;
             try {
-                // Hiển thị trạng thái chờ tải
-                document.getElementById('list').innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--primary);">⏳ Generating report... Please wait.</td></tr>';
-
                 const res = await fetch(`/api/report/${cname}`);
-                
-                if (res.status === 404 || res.status === 400) {
-                     alert("ERROR: This candidate has not completed 5 questions yet.");
-                     loadVideos();
-                     return;
+                if (res.status !== 200) {
+                    alert("Not enough data or file mismatch. Make sure candidate has finished 5 questions.");
+                    return;
                 }
-                
                 const data = await res.json();
-                
                 if (data.ok) {
-                    // Tự động tải file về
                     const a = document.createElement('a');
                     a.href = data.url;
                     a.download = `REPORT_${cname}.txt`;
                     document.body.appendChild(a);
                     a.click();
                     a.remove();
-                    alert(`Report saved as REPORT_${cname}.txt!`);
-                    loadVideos(); // Tải lại giao diện sau khi xong
-                } else {
-                    alert("Unknown error during report generation.");
-                    loadVideos();
                 }
-            } catch(e) { 
-                alert("Critical error creating report. Check console."); 
-                console.error(e);
-                loadVideos();
-            }
+            } catch(e) { alert("Error generating report"); }
         }
-        
+
+        // Hàm gọi lại STT thủ công (phòng hờ)
+        async function transcribeVideo(filename, btn) {
+            btn.innerText = "⏳..."; btn.disabled = true;
+            try {
+                await fetch(`/api/transcribe/${filename}`, {method:'POST'});
+                loadVideos();
+            } catch { alert("Error"); }
+            btn.innerText = "✨ Re-Check"; btn.disabled = false;
+        }
+
         async function nuke() {
-            if(confirm('WARNING: This will delete ALL videos and scores. Continue?')) { 
+            if(confirm('WARNING: DELETE ALL DATA?')) { 
                 await fetch('/api/nuke-all-videos', {method:'DELETE'}); 
                 loadVideos(); 
             }
@@ -184,13 +191,10 @@
         
         function closePreview() {
             document.getElementById('preview-modal').style.display = 'none';
-            document.getElementById('video-place').innerHTML = ''; // Dừng video
+            document.getElementById('video-place').innerHTML = ''; 
         }
 
-        // Chạy lần đầu
         loadVideos();
-        
-        // Tự động cập nhật mỗi 5 giây (Real-time update)
         setInterval(loadVideos, 5000);
     </script>
 </body>
