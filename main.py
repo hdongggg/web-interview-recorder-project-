@@ -26,9 +26,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-UPLOAD_DIR = Path("/mnt/videos")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+# --- [PHẦN SỬA LẠI]: CẤU HÌNH STORAGE CHO RAILWAY ---
+# Thay vì hardcode /mnt/videos, ta dùng logic kiểm tra /storage
+try:
+    UPLOAD_DIR = Path("/storage")
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    # Thử tạo file test để chắc chắn có quyền ghi vào Volume
+    (UPLOAD_DIR / "test_perm.txt").touch()
+    (UPLOAD_DIR / "test_perm.txt").unlink()
+    print("✅ Đã kết nối thành công với Railway Volume tại /storage")
+except (PermissionError, OSError):
+    # Fallback: Nếu chạy Local trên máy tính (không có /storage)
+    print("⚠️ Không tìm thấy /storage (Local Mode). Dùng thư mục ./storage")
+    UPLOAD_DIR = Path("storage")
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+# ----------------------------------------------------
 
 BASE_DIR = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
