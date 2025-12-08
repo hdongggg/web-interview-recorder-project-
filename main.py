@@ -99,8 +99,8 @@ def process_video_background(filename: str, duration: float):
             return
 
         # 1.3 Gọi Gemini lấy Transcript (Chỉ lấy chữ)
-        # Lưu ý: Đã sửa về gemini-2.0-flash cho ổn định
-        model = genai.GenerativeModel(model_name="gemini-2.0-flash")
+        # Lưu ý: Đã sửa về gemini-2.5-flash cho ổn định
+        model = genai.GenerativeModel(model_name="gemini-2.5-flash")
         
         print(f"🎤 [Step 1] Transcribing...")
         stt_response = model.generate_content(
